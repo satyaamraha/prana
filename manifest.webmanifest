@@ -1,18 +1,29 @@
 {
+  "id": "./",
   "name": "Prana — Breathe · Move · Meditate",
   "short_name": "Prana",
   "description": "Daily breathing exercises, breath challenges, workouts with demonstrations, yoga asanas and guided meditation.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#f5f4fa",
   "theme_color": "#12a594",
   "categories": ["health", "fitness", "lifestyle"],
+  "launch_handler": { "client_mode": "focus-existing" },
   "icons": [
     { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Calm down fast (2 min)", "short_name": "Calm", "description": "Physiological sigh breathing", "url": "./#/breathe/sigh", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "7-Minute Workout", "short_name": "Workout", "url": "./#/workout/seven", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Sun Salutation", "short_name": "Yoga", "url": "./#/flow/surya", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Meditate", "short_name": "Meditate", "url": "./#/mind", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
   ]
 }

@@ -5,6 +5,73 @@
   const view = $('#view');
   const S = () => Store.data.settings;
 
+  // ---------------------------------------------------------------------------
+  // Install (PWA)
+  // ---------------------------------------------------------------------------
+  const PWA = (() => {
+    let deferred = null;
+    const ua = navigator.userAgent;
+    const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault(); deferred = e;
+      if (current && !Play.active && (current.tab === 'today' || current.title === 'Settings')) render(true);
+    });
+    window.addEventListener('appinstalled', () => {
+      deferred = null; toast('Prana is installed — find it on your home screen');
+      if (!Play.active) render(true);
+    });
+    function iosGuide() {
+      const sheet = UI.h(`
+        <div class="sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="iosTitle">
+          <div class="sheet">
+            <div class="row between"><h2 id="iosTitle" style="font-size:20px">Install Prana</h2><button class="icon-btn" data-close aria-label="Close">${ICON.close}</button></div>
+            <p class="muted small" style="margin-top:4px">Add Prana to your home screen to use it like an app: full screen, offline, one tap away.</p>
+            <ol class="list-steps" style="margin-top:12px">
+              <li>Open this page in <b>Safari</b>.</li>
+              <li>Tap the <b>Share</b> button <span class="share-glyph" aria-hidden="true">${ICON.upload}</span> in the toolbar.</li>
+              <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+              <li>Tap <b>Add</b>. Prana appears on your home screen.</li>
+            </ol>
+            <button class="btn btn-primary btn-block" data-close style="margin-top:14px">Got it</button>
+          </div>
+        </div>`);
+      sheet.addEventListener('click', (e) => { if (e.target === sheet || e.target.closest('[data-close]')) sheet.remove(); });
+      document.body.appendChild(sheet);
+      $('[data-close]', sheet).focus();
+    }
+    return {
+      standalone,
+      canInstall: () => !standalone() && (!!deferred || ios),
+      async install() {
+        if (deferred) {
+          const d = deferred; deferred = null;
+          d.prompt();
+          try { await d.userChoice; } catch (e) { /* dismissed */ }
+          if (!Play.active) render(true);
+        } else if (ios) iosGuide();
+        else toast('Use your browser menu → “Install app” or “Add to Home screen”');
+      }
+    };
+  })();
+
+  function installCard() {
+    if (!PWA.canInstall() || Store.data.settings.hideInstall) return '';
+    return `<div class="card install-card" style="margin-top:12px">
+      <div class="row" style="align-items:flex-start;gap:14px">
+        <img src="icons/icon-192.png" alt="" width="52" height="52" style="border-radius:14px;flex:none">
+        <div style="flex:1;min-width:0">
+          <h3 style="font-size:16px">Install Prana</h3>
+          <p class="small muted">Add it to your home screen: full screen, works offline, and keeps your streak one tap away.</p>
+          <div class="row" style="margin-top:12px;gap:8px">
+            <button class="btn btn-sm btn-primary" data-install>${ICON.download} Install</button>
+            <button class="btn btn-sm btn-ghost" data-install-hide style="color:var(--muted)">Not now</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
   // UI state that survives navigation
   const st = { breatheTab: 'ex', breatheCat: 'all', moveTab: 'workouts', yogaTab: 'flows', yogaCat: 'All', exSecs: 45, timerMin: 10, timerBell: 0, poseSecs: null };
 
@@ -204,6 +271,7 @@
         </div>
         <div class="week-strip">${week}</div>
       </div>
+      ${installCard()}
       ${section('Today’s practice', `<span class="small muted">${doneCount}/3 done</span>`)}
       ${planHtml}
       ${section('Your programs', '<a href="#/programs">Browse all</a>')}
@@ -611,6 +679,7 @@
       tab: null, title: 'Settings', back: '#/',
       html: `
       <div class="page-head"><h1>Settings</h1></div>
+      ${PWA.standalone() ? '' : `<div class="card" style="padding:4px 16px;margin-bottom:12px"><div class="field"><div><label>Install app</label><div class="hint">Home-screen app that works offline</div></div><button class="btn btn-sm btn-primary" data-install style="--accent:var(--breathe)">${ICON.download} Install</button></div></div>`}
       <div class="card" style="padding:4px 16px">
         <div class="field"><label for="setName">Name</label><input class="input" id="setName" value="${esc(Store.data.profile.name)}" style="max-width:180px"></div>
         <div class="field" style="display:block"><label>Daily goal</label><div style="margin-top:10px">${picker('goal', [5, 10, 15, 20, 30, 45, 60], s.goal, (v) => v + ' min')}</div></div>
@@ -708,6 +777,8 @@
 
   // Delegated interactions within views
   view.addEventListener('click', (e) => {
+    if (e.target.closest('[data-install]')) { PWA.install(); return; }
+    if (e.target.closest('[data-install-hide]')) { S().hideInstall = true; Store.save(); toast('You can install any time from Settings'); render(true); return; }
     const s = e.target.closest('[data-start]');
     if (s) {
       e.preventDefault();
@@ -755,8 +826,41 @@
   applyTheme();
   render();
 
+  // ---------------------------------------------------------------------------
+  // Service worker: offline support + "update available" prompt
+  // ---------------------------------------------------------------------------
   if ('serviceWorker' in navigator && /^https?:/.test(location.protocol)) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    let wantReload = false;
+    const offerUpdate = (worker) => {
+      if ($('#updateBar')) return;
+      const bar = UI.h(`<div class="update-bar" id="updateBar" role="status"><span>${ICON.sparkle} A new version of Prana is ready</span><button class="btn btn-sm">Update</button></div>`);
+      $('button', bar).addEventListener('click', () => {
+        if (Play.active) { toast('Finish your session first — then tap Update'); return; }
+        wantReload = true; bar.remove(); worker.postMessage('SKIP_WAITING');
+      });
+      document.body.appendChild(bar);
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (wantReload) location.reload(); });
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+        if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+        reg.addEventListener('updatefound', () => {
+          const w = reg.installing; if (!w) return;
+          w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(w); });
+        });
+        // check for a new version when the app comes back to the foreground, and hourly
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+        setInterval(() => reg.update().catch(() => {}), 36e5);
+      }).catch(() => {});
+    });
+  }
+
+  window.addEventListener('offline', () => toast('You’re offline — Prana keeps working'));
+  window.addEventListener('online', () => toast('Back online'));
+
+  // Ask the browser not to evict saved progress (granted automatically for installed apps).
+  if (navigator.storage && navigator.storage.persist && (PWA.standalone() || Store.data.log.length)) {
+    navigator.storage.persisted().then((p) => { if (!p) navigator.storage.persist(); }).catch(() => {});
   }
   if (Sound.hasTTS) speechSynthesis.addEventListener('voiceschanged', () => { if (current && current.title === 'Settings' && !Play.active) render(true); });
 

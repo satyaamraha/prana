@@ -420,6 +420,31 @@ svg { display: block; }
 .onboard .orb-demo { width: 150px; height: 150px; margin: 0 auto 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #7ee2d4, var(--breathe) 55%, #0c6e63); animation: breathe 8s ease-in-out infinite; box-shadow: 0 0 60px color-mix(in srgb, var(--breathe) 45%, transparent); }
 @keyframes breathe { 0%, 100% { transform: scale(.7); } 50% { transform: scale(1); } }
 
+/* Install sheet & update bar */
+.sheet-backdrop {
+  position: fixed; inset: 0; z-index: 90; background: rgba(10, 9, 20, .45);
+  display: flex; align-items: flex-end; justify-content: center; animation: plIn .2s ease both;
+}
+.sheet {
+  width: 100%; max-width: 520px; background: var(--surface); color: var(--text);
+  border-radius: 24px 24px 0 0; padding: 20px 20px calc(20px + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, .2); animation: sheetUp .28s cubic-bezier(.2, .9, .3, 1) both;
+}
+@keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.share-glyph { display: inline-grid; vertical-align: -4px; color: #0a84ff; }
+.share-glyph svg { width: 18px; height: 18px; }
+.install-card { border: 1px solid color-mix(in srgb, var(--breathe) 30%, transparent); }
+.update-bar {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 85;
+  top: calc(env(safe-area-inset-top) + 10px); width: calc(100% - 24px); max-width: 520px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 10px 10px 16px; border-radius: 16px; background: var(--text); color: var(--bg);
+  font-weight: 650; font-size: 14.5px; box-shadow: var(--shadow); animation: plIn .3s ease both;
+}
+.update-bar span { display: flex; align-items: center; gap: 8px; }
+.update-bar svg { width: 18px; height: 18px; }
+.update-bar .btn { background: var(--breathe); color: #fff; }
+
 /* Toast */
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 16px); z-index: 80;
