@@ -1,7 +1,7 @@
 /* Prana — immersive session players. */
 (function () {
   'use strict';
-  const { ICON, esc, $, fmt, fmtMin } = UI;
+  const { ICON, esc, $, $$, fmt, fmtMin } = UI;
 
   const RESULT_META = {
     bolt: { label: 'BOLT score', unit: 's', ch: 'bolt' },
@@ -286,9 +286,7 @@
     return { frames: e.frames, anchor: e.anchor || 'hip', prop: e.prop || null, hl: e.hl };
   }
   function framesFrom(list) { return list.map(([n, h, t, label]) => ({ pose: Poses.get(n), h, t, label })); }
-  const VIEW_ORDER = ['auto', 'q', 'front', 'side', 'orbit'];
-  /** The picture-in-picture shows a complementary angle to the main view. */
-  const pipViewFor = (v) => (v === 'q' || v === 'orbit' ? 'side' : 'q');
+  const VIEW_ORDER = Figure.VIEWS;
 
   class TimedSession extends Session {
     constructor(o) { super(o); this.items = o.items; this.i = -1; }
@@ -297,10 +295,12 @@
       this.bar.innerHTML = '<div class="pl-progress"><i></i></div>';
       this.body.innerHTML = `
         <div class="tm-stage">
-          <div class="fig-box"></div>
-          <div class="tm-badge" hidden></div>
-          <button class="tm-view" data-act="view" aria-label="Change camera angle"></button>
-          <button class="tm-pip" data-act="pip" aria-label="Second camera angle — tap to hide"><div class="pip-box"></div></button>
+          <div class="tm-main">
+            <div class="fig-box"></div>
+            <div class="tm-badge" hidden></div>
+            <button class="tm-view" data-act="view" aria-label="Change camera angle"></button>
+          </div>
+          <div class="angle-strip tm-angles">${[0, 1, 2].map((k) => `<button class="angle-tile" data-act="angle${k}"><div class="angle-box"></div><span class="angle-lbl"></span></button>`).join('')}</div>
         </div>
         <div class="tm-cap-row"><span class="stage-cap tm-cap"></span></div>
         <div class="tm-info"><div class="tm-name"></div><div class="tm-sub"></div><div class="tm-breath" hidden></div></div>
@@ -319,25 +319,40 @@
       this.el = {
         box: q('.fig-box'), badge: q('.tm-badge'), name: q('.tm-name'), sub: q('.tm-sub'), breath: q('.tm-breath'),
         timer: q('.tm-timer'), ring: q('.tm-timer .fg'), time: q('.tm-time'), cue: q('.tm-cue'), next: q('.tm-next'), prog: q('.pl-progress i'),
-        restCtl: q('.rest-ctl'), view: q('.tm-view'), pip: q('.tm-pip'), pipBox: q('.pip-box'), cap: q('.tm-cap')
+        restCtl: q('.rest-ctl'), view: q('.tm-view'), stage: q('.tm-stage'), cap: q('.tm-cap')
       };
       const view = Store.data.settings.view || 'auto';
       this.fig = new Figure(this.el.box, { anchor: 'hip', view, onPhase: (i, label) => { this.el.cap.textContent = label || ''; } });
-      this.pip = new Figure(this.el.pipBox, { anchor: 'hip', view: pipViewFor(view), fit: 'tight', label: 'Second camera angle' });
-      this.el.pip.hidden = Store.data.settings.pip === false;
+      // extra angles (front / side / back / top) beside the main view
+      this.tiles = [];
+      if (Store.data.settings.pip !== false) {
+        this.tiles = $$('.angle-tile', this.root).map((btn) => ({ btn, lbl: $('.angle-lbl', btn), f: new Figure($('.angle-box', btn), { anchor: 'hip', fit: 'tight', view: 'front', label: 'Extra camera angle' }) }));
+      } else this.el.stage.classList.add('single');
       this.updateViewBtn();
       this.planned = this.items.reduce((a, it) => a + it.sec, 0);
       this.enter(0);
     }
     cleanup() {
       if (this.fig) { this.fig.destroy(); this.fig = null; }
-      if (this.pip) { this.pip.destroy(); this.pip = null; }
+      for (const t of this.tiles || []) t.f.destroy();
+      this.tiles = [];
+    }
+    /** Point the side tiles at the three angles the main view isn't showing. */
+    syncAngles() {
+      if (!this.tiles.length) return;
+      const views = Figure.otherAngles(this.fig.resolvedView());
+      this.tiles.forEach((t, k) => {
+        t.f.setView(views[k]);
+        t.view = views[k];
+        t.lbl.textContent = Figure.VIEW_LABEL[views[k]];
+        t.btn.setAttribute('aria-label', `Show ${Figure.VIEW_LABEL[views[k]]} view large`);
+      });
     }
     updateViewBtn() {
       const v = Store.data.settings.view || 'auto';
       this.el.view.innerHTML = `${ICON.repeat}<span>${Figure.VIEW_LABEL[v]}</span>`;
     }
-    figs() { return [this.fig, this.pip].filter(Boolean); }
+    figs() { return [this.fig].concat((this.tiles || []).map((t) => t.f)).filter(Boolean); }
     nextMain(from) { for (let j = from + 1; j < this.items.length; j++) if (this.items[j].kind !== 'rest') return this.items[j]; return null; }
     enter(i) {
       if (i >= this.items.length) { this.finish(true); return; }
@@ -358,6 +373,7 @@
             f.show(pose, { dur: smooth ? (d.dur || 1.3) : 0, anchor: d.anchor || pose.anchor || 'hip', flip: !!d.flip });
           }
         }
+        this.syncAngles();
       }
       const isRest = it.kind === 'rest';
       this.el.badge.hidden = !(isRest || it.kind === 'prep');
@@ -407,20 +423,24 @@
       else if (a === 'addrest') { const it = this.items[this.i]; if (it && it.kind === 'rest') { it.sec += 10; this.planned += 10; this.render(); } }
       else if (a === 'view') {
         const s = Store.data.settings;
-        const v = VIEW_ORDER[(VIEW_ORDER.indexOf(s.view || 'auto') + 1) % VIEW_ORDER.length];
-        s.view = v; Store.save();
-        this.fig.setView(v); if (this.pip) this.pip.setView(pipViewFor(v));
-        this.updateViewBtn();
-        UI.toast(`Camera: ${Figure.VIEW_LABEL[v]}`);
-      } else if (a === 'pip') {
-        const s = Store.data.settings; s.pip = false; Store.save();
-        this.el.pip.hidden = true; UI.toast('Second angle hidden — turn it back on in Settings');
+        this.setMainView(VIEW_ORDER[(VIEW_ORDER.indexOf(s.view || 'auto') + 1) % VIEW_ORDER.length], true);
+      } else if (/^angle\d$/.test(a)) {
+        const t = this.tiles[+a.slice(5)];
+        if (t && t.view) this.setMainView(t.view, false);
       }
       else if (a === 'prev') {
         let j = this.i - 1;
         while (j > 0 && this.items[j].kind === 'rest') j--;
         this.enter(Math.max(0, j));
       }
+    }
+    setMainView(v, announce) {
+      const s = Store.data.settings;
+      s.view = v; Store.save();
+      this.fig.setView(v);
+      this.syncAngles();
+      this.updateViewBtn();
+      if (announce) UI.toast(`Camera: ${Figure.VIEW_LABEL[v]}`);
     }
     onPause(p) { for (const f of this.figs()) p ? f.pause() : f.play(); if (!p) this.el.cue.textContent = this.cues[this.cueIdx] || ''; else this.el.cue.textContent = 'Paused — tap play to continue'; }
   }

@@ -119,39 +119,98 @@
   const patternText = (b) => b.phases ? b.phases.map((p) => p[1]).join(' · ') : b.stages ? '4·4 → 4·8' : b.mode === 'power' ? '30 breaths + hold' : `${b.pumps} pumps × ${b.rounds}`;
 
   // Live demo figures on the current page (they follow the camera / speed controls).
-  let liveFigs = [];
+  let liveFigs = [], liveGroups = [];
   const SPEEDS = [1, 0.5, 0.25];
   const speedLabel = (v) => ({ 1: '1×', 0.5: '½×', 0.25: '¼×' }[v] || v + '×');
   const framesOf = (list) => list.map(([n, hh, t, label]) => ({ pose: Poses.get(n), h: hh, t, label }));
 
-  /** Demo stage with camera-angle switcher, optional speed button and step caption. */
+  /** Demo stage: main view + three extra angles, camera switcher, optional speed button and step caption. */
   function stage(figSpec, opts = {}) {
-    const v = S().view || 'auto';
-    return `<div class="detail-stage">
+    const angles = S().pip !== false;
+    return `<div class="detail-stage${angles ? ' with-angles' : ''}">
       <div class="stage-ui">
-        <div class="view-seg" role="group" aria-label="Camera angle">${Figure.VIEWS.map((x) => `<button type="button" data-view="${x}" class="${x === v ? 'active' : ''}" aria-pressed="${x === v}">${Figure.VIEW_LABEL[x]}</button>`).join('')}</div>
+        <div class="view-seg" role="group" aria-label="Camera angle">${Figure.VIEWS.filter((x) => x !== 'auto').map((x) => `<button type="button" data-view="${x}" aria-pressed="false">${Figure.VIEW_LABEL[x]}</button>`).join('')}</div>
         ${opts.speed ? `<button type="button" class="speed-btn" data-speed aria-label="Playback speed">${speedLabel(st.speed || 1)}</button>` : ''}
       </div>
-      <div class="fig-host" data-fig="${figSpec}" data-live="1"></div>
-      ${opts.cap ? '<div class="stage-cap" data-cap></div>' : ''}
+      <div class="stage-main"><div class="fig-host" data-fig="${figSpec}" data-live="1"></div>${opts.cap ? '<div class="stage-cap" data-cap></div>' : ''}</div>
+      ${angles ? `<div class="angle-strip">${[0, 1, 2].map((k) => `<button type="button" class="angle-tile" data-angle-tile="${k}"><div class="angle-box"></div><span class="angle-lbl"></span></button>`).join('')}</div>` : ''}
     </div>`;
   }
 
+  /** One live figure of a demo (main view or an extra angle). */
+  function liveFigure(elm, type, id, o) {
+    if (type === 'ex') {
+      const e = Content.EX[id];
+      const f = new Figure(elm, { anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration', hl: e.hl, view: o.view, fit: o.fit || 'fixed', speed: st.speed || 1, onPhase: o.onPhase || null });
+      return f.loop(framesOf(e.frames));
+    }
+    if (type === 'yogalive') {
+      const y = Content.yoga(id);
+      const f = new Figure(elm, { label: y.name, mat: true, view: o.view, fit: o.fit || 'fixed', speed: st.speed || 1, onPhase: o.onPhase || null });
+      if (y.flowFrames) f.loop(framesOf(y.flowFrames.map((x, i) => [x[0], x[1], x[2], ['Cow — inhale', 'Cat — exhale'][i]])), { anchor: 'rhand' });
+      else f.show(Poses.get(y.pose), { dur: 0 });
+      return f;
+    }
+    if (type === 'surya') {
+      const f = new Figure(elm, { label: 'Sun Salutation demonstration', mat: true, view: o.view, fit: o.fit || 'fixed' });
+      return f.show(Poses.get(Content.suryaSteps('R')[0].pose), { dur: 0 });
+    }
+    return null;
+  }
+
+  /** Point a stage's extra-angle tiles at the views the main figure isn't showing. */
+  function syncGroup(g) {
+    const main = g.main.resolvedView();
+    const views = Figure.otherAngles(main);
+    g.tiles.forEach((t, k) => {
+      t.view = views[k];
+      t.f.setView(views[k]);
+      t.lbl.textContent = Figure.VIEW_LABEL[views[k]];
+      t.btn.setAttribute('aria-label', `Show the ${Figure.VIEW_LABEL[views[k]].toLowerCase()} view large`);
+    });
+    $$('[data-view]', g.stage).forEach((b) => { const on = b.dataset.view === main; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+  }
+  function setGroupView(g, v) {
+    S().view = v; Store.save();
+    g.main.setView(v);
+    syncGroup(g);
+  }
+
   function mountFigures(root) {
-    liveFigs = [];
+    liveFigs = []; liveGroups = [];
     const view = S().view || 'auto';
     $$('[data-fig]', root).forEach((elm) => {
       const spec = elm.dataset.fig;
       const [type, id] = spec.split(':');
       const live = elm.dataset.live != null;
-      const capEl = live ? $('[data-cap]', elm.parentElement) : null;
-      const onPhase = capEl ? (i, label) => { capEl.textContent = label || ''; } : null;
       try {
-        if (type === 'ex') {
+        if (live && (type === 'ex' || type === 'yogalive' || type === 'surya')) {
+          const stageEl = elm.closest('.detail-stage');
+          const capEl = $('[data-cap]', stageEl);
+          const onPhase = capEl ? (i, label) => { capEl.textContent = label || ''; } : null;
+          const main = liveFigure(elm, type, id, { view, onPhase });
+          const tiles = $$('.angle-tile', stageEl).map((btn) => ({ btn, lbl: $('.angle-lbl', btn), f: liveFigure($('.angle-box', btn), type, id, { view: 'front', fit: 'tight' }) }));
+          const g = { main, tiles, stage: stageEl };
+          liveGroups.push(g);
+          liveFigs.push(main, ...tiles.map((t) => t.f));
+          syncGroup(g);
+          if (type === 'surya') {
+            const steps = Content.suryaSteps('R');
+            const figs = [main, ...tiles.map((t) => t.f)];
+            let k = 0;
+            const iv = setInterval(() => {
+              if (!elm.isConnected) { clearInterval(iv); return; }
+              k = (k + 1) % steps.length;
+              const s = steps[k];
+              for (const f of figs) f.show(Poses.get(s.pose), { dur: k === 0 ? 0 : 1.2, anchor: s.anchor });
+              const cap = $('[data-surya-cap]');
+              if (cap) cap.innerHTML = `<b>${k + 1}. ${esc(s.name)}</b> · ${esc(s.breath)}`;
+            }, 2200);
+          }
+        } else if (type === 'ex') {
           const e = Content.EX[id];
-          const f = new Figure(elm, { anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration', hl: e.hl, view: live ? view : 'auto', speed: live ? (st.speed || 1) : 1, onPhase });
+          const f = new Figure(elm, { anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration', hl: e.hl });
           f.loop(framesOf(e.frames));
-          if (live) liveFigs.push(f);
         } else if (type === 'exstill') {
           const e = Content.EX[id];
           const fr = e.frames[e.frames.length > 1 ? 1 : 0];
@@ -161,26 +220,6 @@
         } else if (type === 'yoga') {
           const y = Content.yoga(id);
           Figure.still(elm, Poses.get(y.flowFrames ? y.flowFrames[0][0] : y.pose));
-        } else if (type === 'yogalive') {
-          const y = Content.yoga(id);
-          const f = new Figure(elm, { label: y.name, mat: true, view, onPhase });
-          if (y.flowFrames) f.loop(framesOf(y.flowFrames.map((x, i) => [x[0], x[1], x[2], ['Cow — inhale', 'Cat — exhale'][i]])), { anchor: 'rhand' });
-          else f.show(Poses.get(y.pose), { dur: 0 });
-          liveFigs.push(f);
-        } else if (type === 'surya') {
-          const steps = Content.suryaSteps('R');
-          const f = new Figure(elm, { label: 'Sun Salutation demonstration', mat: true, view });
-          liveFigs.push(f);
-          let k = 0;
-          f.show(Poses.get(steps[0].pose), { dur: 0 });
-          const iv = setInterval(() => {
-            if (!elm.isConnected) { clearInterval(iv); return; }
-            k = (k + 1) % steps.length;
-            const s = steps[k];
-            f.show(Poses.get(s.pose), { dur: k === 0 ? 0 : 1.2, anchor: s.anchor });
-            const cap = $('[data-surya-cap]');
-            if (cap) cap.innerHTML = `<b>${k + 1}. ${esc(s.name)}</b> · ${esc(s.breath)}`;
-          }, 2200);
         }
       } catch (err) { console.error('figure', spec, err); }
     });
@@ -766,7 +805,7 @@
         ${sw('ambient', 'Ambient sound', 'Soft drone or rain during meditation')}
         ${sw('vibrate', 'Vibration', 'Haptic cues on supported phones')}
         <div class="field"><div><label for="setView">Demo camera angle</label><div class="hint">Also switchable on any demo</div></div><select class="input" id="setView">${Figure.VIEWS.map((v) => `<option value="${v}" ${(s.view || 'auto') === v ? 'selected' : ''}>${Figure.VIEW_LABEL[v]}</option>`).join('')}</select></div>
-        ${sw('pip', 'Second angle in sessions', 'Small picture-in-picture view of each move')}
+        ${sw('pip', 'Extra camera angles', 'Front, side, back and top views beside each demo')}
         <div class="field"><label>Test</label><button class="btn btn-sm" id="testVoice">${ICON.volume} Play sample</button></div>
       </div>
       ${section('Appearance')}
@@ -1012,10 +1051,15 @@
     }
     const vb = e.target.closest('[data-view]');
     if (vb) {
-      const v = vb.dataset.view;
-      S().view = v; Store.save();
-      liveFigs.forEach((f) => f.setView(v));
-      $$('[data-view]', view).forEach((b) => { b.classList.toggle('active', b === vb); b.setAttribute('aria-pressed', String(b === vb)); });
+      const g = liveGroups.find((x) => x.stage.contains(vb));
+      if (g) setGroupView(g, vb.dataset.view);
+      return;
+    }
+    const tb = e.target.closest('[data-angle-tile]');
+    if (tb) {
+      const g = liveGroups.find((x) => x.stage.contains(tb));
+      const t = g && g.tiles[+tb.dataset.angleTile];
+      if (t && t.view) setGroupView(g, t.view);
       return;
     }
     const sb = e.target.closest('[data-speed]');

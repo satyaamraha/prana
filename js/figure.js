@@ -21,7 +21,9 @@
     ['lel', 'el'], ['lha', 'ha'], ['rel', 'el'], ['rha', 'ha'], ['lkn', 'kn'], ['lan', 'an'], ['lto', 'to'], ['rkn', 'kn'], ['ran', 'an'], ['rto', 'to']];
   const ANCHOR = { hip: 'hip', ltoe: 'lto', rtoe: 'rto', lhand: 'lha', rhand: 'rha', lto: 'lto', rto: 'rto', lha: 'lha', rha: 'rha', head: 'head', lkn: 'lkn', rkn: 'rkn' };
   /** Camera presets: th = yaw around the vertical axis, ph = downward pitch. */
-  const VIEWS = { side: { th: 0, ph: 0 }, front: { th: 90, ph: 0 }, q: { th: 38, ph: 13 }, back: { th: 180, ph: 0 } };
+  const VIEWS = { side: { th: 0, ph: 0 }, front: { th: 90, ph: 0 }, back: { th: 270, ph: 0 }, q: { th: 38, ph: 13 } };
+  /** Orthogonal angles offered alongside the main view. */
+  const ORTHO = ['front', 'side', 'back', 'top'];
   const ORBIT_DEG_PER_S = 36;
 
   // segments drawn as individual strokes so they can be depth-sorted and highlighted
@@ -153,7 +155,7 @@
     for (const k in P) {
       const X = P[k][0] + (cam.ox || 0), Y = P[k][1], Z = P[k][2] + (cam.oz || 0);
       const d = X * st + Z * ct;
-      out[k] = [f * (X * ct - Z * st), Y * cp + d * sp, d];
+      out[k] = [f * (X * ct - Z * st), Y * cp + d * sp, d * cp - Y * sp];
     }
     return out;
   }
@@ -236,12 +238,22 @@
       if (view === 'orbit') return { th: base + 38 + this.t * ORBIT_DEG_PER_S, ph: 13, orbit: true };
       if (view === 'q') return { th: base + VIEWS.q.th, ph: VIEWS.q.ph };
       if (view === 'auto') return { th: base, ph: 0 };
+      if (view === 'top') return { th: base, ph: 90, top: true };   // looking straight down, same heading as auto
       // explicit side/front: a front-authored pose seen "from the side" is base+90
       const want = VIEWS[view] || VIEWS.side;
       return { th: want.th, ph: want.ph };
     }
 
+    /** The concrete angle being shown ('auto' resolves to side or front). */
+    resolvedView() {
+      const view = this.o.view || 'auto';
+      if (view !== 'auto') return view;
+      const K = this.mode === 'loop' && this.kf ? this.kf[0].K : this.cur ? this.cur.K : null;
+      return K && K.v === 'f' ? 'front' : 'side';
+    }
+
     setView(view) {
+      if (this.o.view === view) return;
       this.o.view = view;
       if (this.mode === 'loop') this._fitLoop();
       else if (this.mode === 'show' && this.cur) { this.from = null; this.cam = this._camFor(this._bboxShow(this.cur.K, this.cur.W, this.cur.flip)); this._applyCam(this.cam); }
@@ -251,11 +263,19 @@
     setSpeed(s) { this.o.speed = s; }
 
     _camFor(bb) {
+      if (this.o.view === 'top' && this.o.fit !== 'tight') {
+        // overhead: centre the body, keep a steady scale through the movement
+        const w = Math.max(150, bb.x1 - bb.x0 + 50);
+        const hgt = Math.max(w * BOX_H / BOX_W, bb.y1 - bb.y0 + 30);
+        const cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+        return { x: cx - w / 2, y: cy - hgt / 2, w, h: hgt };
+      }
       if (this.o.fit === 'tight') {
         const pad = 10;
         let w = bb.x1 - bb.x0 + pad * 2, hgt = bb.y1 - bb.y0 + pad * 2;
         const cx = (bb.x0 + bb.x1) / 2;
         if (w / hgt < 1.25) w = hgt * 1.25; else hgt = w / 1.25;
+        if (this.o.view === 'top') return { x: cx - w / 2, y: (bb.y0 + bb.y1) / 2 - hgt / 2, w, h: hgt };
         const bottom = Math.max(8, bb.y1 + pad);
         return { x: cx - w / 2, y: bottom - hgt, w, h: hgt };
       }
@@ -475,7 +495,7 @@
       const c3 = [(P.lto[0] + P.rto[0] + P.hip[0]) / 3, 0, (P.lto[2] + P.rto[2] + P.hip[2]) / 3];
       const fc = projPt(c3, cam);
       if (!flat) {
-        const R = this.o.fit === 'tight'
+        const R = this.o.fit === 'tight' || cam.ph > 60
           ? Math.max(30, (Math.max(...lowX, fc[0]) - Math.min(...lowX, fc[0])) / 2 + 22)
           : Math.max(70, (this.cam ? this.cam.w : BOX_W) * 0.4);
         this.floorE.setAttribute('cx', r1(fc[0])); this.floorE.setAttribute('cy', r1(fc[1]));
@@ -522,8 +542,13 @@
     static destroyAll() { for (const f of [...all]) f.destroy(); }
     static debug(pose) { return prep(pose).P; }
   }
-  Figure.VIEWS = ['auto', 'side', 'front', 'q', 'orbit'];
-  Figure.VIEW_LABEL = { auto: 'Auto', side: 'Side', front: 'Front', q: '3/4', orbit: '360°' };
+  Figure.VIEWS = ['auto', 'side', 'front', 'back', 'top', 'q', 'orbit'];
+  Figure.VIEW_LABEL = { auto: 'Auto', side: 'Side', front: 'Front', back: 'Back', top: 'Top', q: '3/4', orbit: '360°' };
+  /** Three extra angles that complement the main one (front / side / back / top). */
+  Figure.otherAngles = (main) => {
+    const rest = ORTHO.filter((v) => v !== main);
+    return rest.length > 3 ? ['front', 'side', 'top'] : rest;
+  };
 
   window.Figure = Figure;
 })();
