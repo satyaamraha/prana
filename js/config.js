@@ -4,5 +4,5 @@
  * Never put a secret / service_role key here. Leave the key empty to disable accounts. */
 window.PRANA_CONFIG = {
   supabaseUrl: 'https://wzxatodvucebavvtnejg.supabase.co',
-  supabaseKey: ''
+  supabaseKey: 'sb_publishable_SDKnFk4ezJiR8n8YEmWdmg_0I15207P'
 };
