@@ -10,8 +10,10 @@
 	# Always revalidate the shell and service worker so updates reach installed apps.
 	@fresh path / /index.html /sw.js /manifest.webmanifest
 	header @fresh Cache-Control "no-cache"
-	header /css/* Cache-Control "public, max-age=3600"
-	header /js/* Cache-Control "public, max-age=3600"
+	# Scripts/styles revalidate on every load (cheap 304s via ETag) so the
+	# shell and code never mismatch; the service worker handles offline speed.
+	header /css/* Cache-Control "no-cache"
+	header /js/* Cache-Control "no-cache"
 	header /icons/* Cache-Control "public, max-age=86400"
 
 	@manifest path *.webmanifest

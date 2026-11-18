@@ -81,6 +81,21 @@
   const CAT_ICON = { calm: 'leaf', focus: 'target', energy: 'bolt', sleep: 'bed', balance: 'heart' };
   const CAT_NAME = { calm: 'Calm', focus: 'Focus', energy: 'Energy', sleep: 'Sleep', balance: 'Balance' };
   const start = (desc) => `data-start='${esc(JSON.stringify(desc))}'`;
+  const restLabel = (v) => (+v ? v + 's' : 'None');
+  /** Remembered rest/timing preferences (synced with the account). */
+  function PF() {
+    const s = S();
+    s.prefs = Object.assign({ wk: {}, breathRest: {}, flowPause: 5, suryaRest: 15, suryaPace: 5, exSets: 3, exRest: 30 }, s.prefs || {});
+    s.prefs.wk = s.prefs.wk || {}; s.prefs.breathRest = s.prefs.breathRest || {};
+    return s.prefs;
+  }
+  function setPref(path, val) {
+    const keys = path.split('.');
+    let o = PF();
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]] = o[keys[i]] || {};
+    o[keys[keys.length - 1]] = val;
+    Store.save();
+  }
 
   function sCard(o) {
     const tag = o.href ? 'a' : 'button';
@@ -103,20 +118,44 @@
   const caution = (t) => t ? `<div class="caution" style="margin-top:14px">${ICON.alert}<div>${esc(t)}</div></div>` : '';
   const patternText = (b) => b.phases ? b.phases.map((p) => p[1]).join(' · ') : b.stages ? '4·4 → 4·8' : b.mode === 'power' ? '30 breaths + hold' : `${b.pumps} pumps × ${b.rounds}`;
 
+  // Live demo figures on the current page (they follow the camera / speed controls).
+  let liveFigs = [];
+  const SPEEDS = [1, 0.5, 0.25];
+  const speedLabel = (v) => ({ 1: '1×', 0.5: '½×', 0.25: '¼×' }[v] || v + '×');
+  const framesOf = (list) => list.map(([n, hh, t, label]) => ({ pose: Poses.get(n), h: hh, t, label }));
+
+  /** Demo stage with camera-angle switcher, optional speed button and step caption. */
+  function stage(figSpec, opts = {}) {
+    const v = S().view || 'auto';
+    return `<div class="detail-stage">
+      <div class="stage-ui">
+        <div class="view-seg" role="group" aria-label="Camera angle">${Figure.VIEWS.map((x) => `<button type="button" data-view="${x}" class="${x === v ? 'active' : ''}" aria-pressed="${x === v}">${Figure.VIEW_LABEL[x]}</button>`).join('')}</div>
+        ${opts.speed ? `<button type="button" class="speed-btn" data-speed aria-label="Playback speed">${speedLabel(st.speed || 1)}</button>` : ''}
+      </div>
+      <div class="fig-host" data-fig="${figSpec}" data-live="1"></div>
+      ${opts.cap ? '<div class="stage-cap" data-cap></div>' : ''}
+    </div>`;
+  }
+
   function mountFigures(root) {
+    liveFigs = [];
+    const view = S().view || 'auto';
     $$('[data-fig]', root).forEach((elm) => {
       const spec = elm.dataset.fig;
       const [type, id] = spec.split(':');
+      const live = elm.dataset.live != null;
+      const capEl = live ? $('[data-cap]', elm.parentElement) : null;
+      const onPhase = capEl ? (i, label) => { capEl.textContent = label || ''; } : null;
       try {
         if (type === 'ex') {
           const e = Content.EX[id];
-          const f = new Figure(elm, { anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration' });
-          f.loop(e.frames.map(([n, hh, t]) => ({ pose: Poses.get(n), h: hh, t })));
-          if (elm.dataset.still != null) { f.pause(); }
+          const f = new Figure(elm, { anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration', hl: e.hl, view: live ? view : 'auto', speed: live ? (st.speed || 1) : 1, onPhase });
+          f.loop(framesOf(e.frames));
+          if (live) liveFigs.push(f);
         } else if (type === 'exstill') {
           const e = Content.EX[id];
           const fr = e.frames[e.frames.length > 1 ? 1 : 0];
-          Figure.still(elm, Poses.get(fr[0]), { prop: e.prop || null, anchor: e.anchor || 'hip' });
+          Figure.still(elm, Poses.get(fr[0]), { prop: e.prop || null, anchor: e.anchor || 'hip', hl: e.hl });
         } else if (type === 'pose') {
           Figure.still(elm, Poses.get(id));
         } else if (type === 'yoga') {
@@ -124,12 +163,14 @@
           Figure.still(elm, Poses.get(y.flowFrames ? y.flowFrames[0][0] : y.pose));
         } else if (type === 'yogalive') {
           const y = Content.yoga(id);
-          const f = new Figure(elm, { label: y.name, mat: true });
-          if (y.flowFrames) f.loop(y.flowFrames.map(([n, hh, t]) => ({ pose: Poses.get(n), h: hh, t })), { anchor: 'rhand' });
+          const f = new Figure(elm, { label: y.name, mat: true, view, onPhase });
+          if (y.flowFrames) f.loop(framesOf(y.flowFrames.map((x, i) => [x[0], x[1], x[2], ['Cow — inhale', 'Cat — exhale'][i]])), { anchor: 'rhand' });
           else f.show(Poses.get(y.pose), { dur: 0 });
+          liveFigs.push(f);
         } else if (type === 'surya') {
           const steps = Content.suryaSteps('R');
-          const f = new Figure(elm, { label: 'Sun Salutation demonstration', mat: true });
+          const f = new Figure(elm, { label: 'Sun Salutation demonstration', mat: true, view });
+          liveFigs.push(f);
           let k = 0;
           f.show(Poses.get(steps[0].pose), { dur: 0 });
           const iv = setInterval(() => {
@@ -176,6 +217,7 @@
           <div>I understand Prana is not medical advice. I’ll consult a doctor if I have health conditions or am pregnant, and I will never do breath-holding exercises in water, while driving, or standing.</div>
         </label>
         <button class="btn btn-primary btn-block" id="obGo" style="margin-top:18px;height:54px" disabled>Begin my practice</button>
+        ${Sync.enabled ? '<p class="small muted" style="text-align:center;margin-top:16px">Already use Prana on another device? <a href="#/account" style="color:var(--breathe);font-weight:700">Sign in</a></p>' : ''}
       </div>`,
       after(root) {
         let goal = 10;
@@ -272,6 +314,13 @@
         <div class="week-strip">${week}</div>
       </div>
       ${installCard()}
+      ${Sync.enabled && !Sync.user && !S().hideSyncNudge && Store.data.log.length > 0 ? `<div class="card install-card" style="margin-top:12px">
+        <div class="row" style="align-items:flex-start;gap:14px">
+          <div class="avatar">${ICON.repeat}</div>
+          <div style="flex:1;min-width:0"><h3 style="font-size:16px">Keep your progress safe</h3><p class="small muted">Create a free account to back up your streak and sync it across your phone, tablet and computer.</p>
+            <div class="row" style="margin-top:12px;gap:8px"><a class="btn btn-sm btn-primary" href="#/account">Create account</a><button class="btn btn-sm btn-ghost" data-sync-hide style="color:var(--muted)">Not now</button></div>
+          </div>
+        </div></div>` : ''}
       ${section('Today’s practice', `<span class="small muted">${doneCount}/3 done</span>`)}
       ${planHtml}
       ${section('Your programs', '<a href="#/programs">Browse all</a>')}
@@ -317,6 +366,10 @@
       : `<div class="pattern"><span><b>${b.pumps}</b> ${b.mode === 'pumps' ? 'snap exhales' : 'bellows breaths'}</span><span><b>${b.rest}s</b> rest</span><span><b>×${b.rounds}</b> rounds</span></div>`;
     const opts = b.mode === 'pumps' || b.mode === 'bellows' ? [2, 4, 6] : b.stages ? [5, 8, 12] : [1, 2, 3, 5, 10, 15];
     if (!opts.includes(mins) && !fixed) opts.push(mins), opts.sort((a, c) => a - c);
+    const savedRest = PF().breathRest[id];
+    const rest = savedRest != null ? savedRest : Content.breathRestDefault(b);
+    const roundBased = b.mode === 'pumps' || b.mode === 'bellows' || b.mode === 'power';
+    const restHint = roundBased ? 'Natural breathing between rounds.' : b.stages ? 'A short pause as the rhythm changes.' : 'Optional pauses of natural breathing, about every 2 minutes.';
     return {
       tab: 'breathe', title: b.name, accent: 'var(--breathe)', back: '#/breathe',
       html: `
@@ -324,10 +377,11 @@
       <div class="detail-title"><div class="eyebrow">${CAT_NAME[b.cat]} · ${esc(b.level)}</div><h1>${esc(b.name)}</h1>${b.sub ? `<div class="sk">${esc(b.sub)}</div>` : ''}<p>${esc(b.about)}</p></div>
       ${section('Pattern')}${phasesHtml}
       ${fixed ? '' : section('Duration') + picker('bm_' + id, opts, mins, (v) => v + ' min')}
+      ${section(roundBased ? 'Rest between rounds' : 'Rest breaks')}<p class="small muted" style="margin:-6px 0 10px">${restHint}</p>${picker('p:breathRest.' + id, Content.breathRestOptions(b), rest, restLabel)}
       ${section('How to')}${listSteps(b.steps)}
       ${section('Benefits')}${listDots(b.benefits)}
       ${caution(b.caution)}
-      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'breath', id: b.id, minutes: fixed ? undefined : mins })}>${ICON.play} Start · ${fixed ? b.minutes : mins} min</button></div>`
+      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'breath', id: b.id, minutes: fixed ? undefined : mins, rest })}>${ICON.play} Start · ${fixed ? b.minutes : mins} min</button></div>`
     };
   }
 
@@ -367,7 +421,8 @@
     const tabs = `<div class="seg" data-seg="moveTab"><button class="${st.moveTab === 'workouts' ? 'active' : ''}" data-v="workouts">Workouts</button><button class="${st.moveTab === 'ex' ? 'active' : ''}" data-v="ex">Exercise library</button></div>`;
     let body;
     if (st.moveTab === 'workouts') {
-      body = Content.WORKOUTS.map((w) => {
+      body = Content.WORKOUTS.map((w0) => {
+        const w = Play.workoutWith(w0, PF().wk[w0.id] || {});
         const min = Math.round(Content.workoutSeconds(w) / 60);
         return sCard({ href: '#/workout/' + w.id, icon: w.icon, title: w.name, sub: w.tag, done: isDoneToday({ id: w.id }), meta: [{ t: min + ' min', icon: 'clock' }, { t: w.items.length + ' moves' + (w.rounds > 1 ? ` × ${w.rounds}` : '') }, { t: w.level, accent: true }] });
       }).join('');
@@ -382,16 +437,25 @@
   }
 
   function workoutDetail(id) {
-    const w = Content.workout(id); if (!w) return notFound();
+    const base = Content.workout(id); if (!base) return notFound();
+    const saved = PF().wk[id] || {};
+    const w = Play.workoutWith(base, saved);
     const min = Math.round(Content.workoutSeconds(w) / 60);
     const rows = w.items.map((eid) => { const e = Content.EX[eid]; return `<a class="ex-row" href="#/exercise/${eid}"><div class="ex-fig" data-fig="exstill:${eid}"></div><div><div class="ex-name">${esc(e.name)}</div><div class="small muted">${esc(e.muscles)}</div></div><span class="ex-time">${w.work}s</span></a>`; }).join('');
+    const tuned = saved.work != null || saved.rest != null || saved.rounds != null;
     return {
       tab: 'move', title: w.name, accent: 'var(--move)', back: '#/move',
       html: `
       <div class="hero" style="--c1:#ee5f38;--c2:#e0306b;margin-bottom:6px">
         <div class="eyebrow" style="color:#fff;opacity:.85">${esc(w.level)}</div>
         <h2 style="margin-top:4px">${esc(w.name)}</h2><p>${esc(w.tag)}</p>
-        <div class="facts">${[`${min} min`, `${w.work}s work`, `${w.rest}s rest`, w.rounds > 1 ? `${w.rounds} rounds` : '1 round'].map((t) => `<span class="pill" style="background:rgba(255,255,255,.2);color:#fff">${t}</span>`).join('')}</div>
+        <div class="facts">${[`${min} min`, `${w.work}s work`, w.rest ? `${w.rest}s rest` : 'no rest', w.rounds > 1 ? `${w.rounds} rounds` : '1 round'].map((t) => `<span class="pill" style="background:rgba(255,255,255,.2);color:#fff">${t}</span>`).join('')}</div>
+      </div>
+      ${section('Timing', tuned ? `<button class="link" data-reset-wk="${id}">Reset to default</button>` : '')}
+      <div class="card" style="padding:4px 16px">
+        <div class="field" style="display:block"><label>Work per exercise</label><div style="margin-top:8px">${picker(`p:wk.${id}.work`, [20, 30, 40, 45, 60], w.work, (v) => v + 's')}</div></div>
+        <div class="field" style="display:block"><label>Rest between exercises</label><div style="margin-top:8px">${picker(`p:wk.${id}.rest`, [0, 10, 15, 20, 30, 45, 60], w.rest, restLabel)}</div></div>
+        <div class="field" style="display:block"><label>Rounds</label><div class="hint">${w.roundRest || 30}s rest between rounds</div><div style="margin-top:8px">${picker(`p:wk.${id}.rounds`, [1, 2, 3, 4], w.rounds)}</div></div>
       </div>
       ${section('Exercises', `<span class="small muted">${w.items.length} moves</span>`)}
       <div class="card ex-list" style="padding:6px 14px">${rows}</div>
@@ -402,16 +466,23 @@
 
   function exerciseDetail(id) {
     const e = Content.EX[id]; if (!e) return notFound();
-    const secs = st.exSecs;
+    const secs = st.exSecs, sets = PF().exSets, rest = PF().exRest;
+    const dur = (v) => v < 60 ? v + 's' : fmt(v);
     return {
       tab: 'move', title: e.name, accent: 'var(--move)', back: '#/move',
       html: `
-      <div class="detail-stage"><div data-fig="ex:${e.id}"></div></div>
+      ${stage('ex:' + e.id, { speed: true, cap: true })}
       <div class="detail-title"><div class="eyebrow">${esc(e.level)}</div><h1>${esc(e.name)}</h1><p>${esc(e.muscles)}</p></div>
+      ${e.hl.length ? '<div class="legend-hl" style="margin-top:10px"><i></i> Muscles worked are highlighted in the demo</div>' : ''}
       ${section('How to do it')}${listSteps(e.steps)}
       ${e.tips ? section('Form tips') + listDots(e.tips) : ''}
-      ${section('Practice')}${picker('exSecs', [20, 30, 45, 60, 90, 120], secs, (v) => v < 60 ? v + 's' : fmt(v))}
-      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'exercise', id: e.id, seconds: secs })}>${ICON.play} Practice ${secs < 60 ? secs + 's' : fmt(secs)}</button></div>`
+      ${section('Practice')}
+      <div class="card" style="padding:4px 16px">
+        <div class="field" style="display:block"><label>Time per set</label><div style="margin-top:8px">${picker('exSecs', [20, 30, 45, 60, 90, 120], secs, dur)}</div></div>
+        <div class="field" style="display:block"><label>Sets</label><div style="margin-top:8px">${picker('p:exSets', [1, 2, 3, 4, 5], sets)}</div></div>
+        ${sets > 1 ? `<div class="field" style="display:block"><label>Rest between sets</label><div style="margin-top:8px">${picker('p:exRest', [15, 30, 45, 60, 90], rest, (v) => v + 's')}</div></div>` : ''}
+      </div>
+      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'exercise', id: e.id, seconds: secs, sets, rest })}>${ICON.play} ${sets > 1 ? `${sets} × ${dur(secs)}` : 'Practice ' + dur(secs)}</button></div>`
     };
   }
 
@@ -423,7 +494,7 @@
     let body;
     if (st.yogaTab === 'flows') {
       body = Content.FLOWS.map((f) => {
-        const min = Math.round(Content.flowSeconds(f) / 60);
+        const min = Math.round(Content.flowSeconds(f, { pause: PF().flowPause, roundRest: PF().suryaRest, pace: PF().suryaPace }) / 60);
         return sCard({ href: '#/flow/' + f.id, icon: f.icon, title: f.name, sub: f.sub ? `${f.sub} — ${f.tag}` : f.tag, done: isDoneToday({ id: f.id }), meta: [{ t: min + ' min', icon: 'clock' }, { t: f.type === 'surya' ? '12 postures' : f.items.length + ' poses' }, { t: f.level, accent: true }] });
       }).join('');
     } else {
@@ -441,25 +512,26 @@
   function flowDetail(id) {
     const f = Content.flow(id); if (!f) return notFound();
     if (f.type === 'surya') {
-      const rounds = st.suryaRounds || f.rounds, pace = st.suryaPace || f.pace;
-      const ff = Object.assign({}, f, { pace });
-      const min = Math.round(Content.flowSeconds(ff, rounds) / 60);
+      const rounds = st.suryaRounds || f.rounds, pace = PF().suryaPace || f.pace, roundRest = PF().suryaRest;
+      const min = Math.round(Content.flowSeconds(f, { rounds, pace, roundRest }) / 60);
       const steps = Content.suryaSteps('R');
       return {
         tab: 'yoga', title: f.name, accent: 'var(--yoga)', back: '#/yoga',
         html: `
-        <div class="detail-stage"><div data-fig="surya"></div></div>
+        ${stage('surya')}
         <p class="small" style="text-align:center;margin:-6px 0 14px" data-surya-cap><b>1. Prayer Pose</b> · Exhale</p>
         <div class="detail-title"><div class="eyebrow">${esc(f.level)}</div><h1>${esc(f.name)}</h1><div class="sk">${esc(f.sub)}</div><p>${esc(f.about)}</p></div>
         ${section('Rounds')}${picker('suryaRounds', [1, 2, 3, 5, 8, 12], rounds)}
-        ${section('Pace')}${picker('suryaPace', [7, 5, 4], pace, (v) => ({ 7: 'Slow', 5: 'Steady', 4: 'Brisk' }[v]))}
+        ${section('Pace')}${picker('p:suryaPace', [7, 5, 4], pace, (v) => ({ 7: 'Slow', 5: 'Steady', 4: 'Brisk' }[v]))}
+        ${section('Rest between rounds')}${picker('p:suryaRest', [0, 10, 15, 20, 30, 45], roundRest, restLabel)}
         ${section('The 12 postures')}
         <div class="card ex-list" style="padding:6px 14px">${steps.map((s, i) => `<div class="ex-row"><div class="ex-fig" data-fig="pose:${s.pose}"></div><div><div class="ex-name">${i + 1}. ${esc(s.name)}</div><div class="small muted"><i>${esc(s.sk)}</i> · ${esc(s.breath)}</div></div></div>`).join('')}</div>
         ${caution('Move gently and within your range. Avoid if you have recent back, wrist or shoulder injuries; in pregnancy, practise a modified version with a teacher.')}
-        <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'flow', id: 'surya', rounds })} data-pace="${pace}">${ICON.play} Start · ${rounds} rounds · ${min} min</button></div>`
+        <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'flow', id: 'surya', rounds, pace, roundRest })}>${ICON.play} Start · ${rounds} rounds · ${min} min</button></div>`
       };
     }
-    const min = Math.round(Content.flowSeconds(f) / 60);
+    const pause = PF().flowPause;
+    const min = Math.round(Content.flowSeconds(f, { pause }) / 60);
     const rows = f.items.map(([pid, s]) => { const y = Content.yoga(pid); return `<a class="ex-row" href="#/pose/${pid}"><div class="ex-fig" data-fig="yoga:${pid}"></div><div><div class="ex-name">${esc(y.name)}</div><div class="small muted"><i>${esc(y.sk)}</i>${y.sides ? ' · both sides' : ''}</div></div><span class="ex-time">${s}s</span></a>`; }).join('');
     return {
       tab: 'yoga', title: f.name, accent: 'var(--yoga)', back: '#/yoga',
@@ -469,9 +541,10 @@
         <h2 style="margin-top:4px">${esc(f.name)}</h2><p>${esc(f.tag)}</p>
         <div class="facts"><span class="pill" style="background:rgba(255,255,255,.2);color:#fff">${min} min</span><span class="pill" style="background:rgba(255,255,255,.2);color:#fff">${f.items.length} poses</span></div>
       </div>
+      ${section('Transition between poses')}<p class="small muted" style="margin:-6px 0 10px">A pause to come out of one pose and into the next. The demo shows the next pose while you move.</p>${picker('p:flowPause', [0, 5, 10, 15], pause, restLabel)}
       ${section('Sequence')}
       <div class="card ex-list" style="padding:6px 14px">${rows}</div>
-      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'flow', id: f.id })}>${ICON.play} Start flow · ${min} min</button></div>`
+      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'flow', id: f.id, pause })}>${ICON.play} Start flow · ${min} min</button></div>`
     };
   }
 
@@ -482,7 +555,7 @@
     return {
       tab: 'yoga', title: y.name, accent: 'var(--yoga)', back: '#/yoga',
       html: `
-      <div class="detail-stage"><div data-fig="yogalive:${y.id}"></div></div>
+      ${stage('yogalive:' + y.id, { cap: !!y.flowFrames })}
       <div class="detail-title"><div class="eyebrow">${esc(y.cat)} · ${esc(y.level)}</div><h1>${esc(y.name)}</h1><div class="sk">${esc(y.sk)}</div><p>“${esc(y.cue)}”</p></div>
       ${section('How to')}${listSteps(y.steps)}
       ${section('Benefits')}${listDots(y.benefits)}
@@ -679,6 +752,7 @@
       tab: null, title: 'Settings', back: '#/',
       html: `
       <div class="page-head"><h1>Settings</h1></div>
+      ${accountCard()}
       ${PWA.standalone() ? '' : `<div class="card" style="padding:4px 16px;margin-bottom:12px"><div class="field"><div><label>Install app</label><div class="hint">Home-screen app that works offline</div></div><button class="btn btn-sm btn-primary" data-install style="--accent:var(--breathe)">${ICON.download} Install</button></div></div>`}
       <div class="card" style="padding:4px 16px">
         <div class="field"><label for="setName">Name</label><input class="input" id="setName" value="${esc(Store.data.profile.name)}" style="max-width:180px"></div>
@@ -691,6 +765,8 @@
         ${sw('sound', 'Sounds', 'Breath tones, bells and beeps')}
         ${sw('ambient', 'Ambient sound', 'Soft drone or rain during meditation')}
         ${sw('vibrate', 'Vibration', 'Haptic cues on supported phones')}
+        <div class="field"><div><label for="setView">Demo camera angle</label><div class="hint">Also switchable on any demo</div></div><select class="input" id="setView">${Figure.VIEWS.map((v) => `<option value="${v}" ${(s.view || 'auto') === v ? 'selected' : ''}>${Figure.VIEW_LABEL[v]}</option>`).join('')}</select></div>
+        ${sw('pip', 'Second angle in sessions', 'Small picture-in-picture view of each move')}
         <div class="field"><label>Test</label><button class="btn btn-sm" id="testVoice">${ICON.volume} Play sample</button></div>
       </div>
       ${section('Appearance')}
@@ -714,6 +790,7 @@
         $$('[data-set]', root).forEach((i) => i.addEventListener('change', () => { s[i.dataset.set] = i.checked; Store.save(); }));
         const sv = $('#setVoice', root); if (sv) sv.addEventListener('change', () => { s.voiceURI = sv.value; Store.save(); Sound.speak('Breathe in… and breathe out.'); });
         $('#testVoice', root).addEventListener('click', () => { Sound.unlock(); Sound.bell(); setTimeout(() => Sound.speak('Welcome to Prana. Breathe in… and breathe out.'), 400); });
+        $('#setView', root).addEventListener('change', (e) => { s.view = e.target.value; Store.save(); });
         $('#setTheme', root).addEventListener('change', (e) => { s.theme = e.target.value; Store.save(); applyTheme(); });
         $('#setRem', root).addEventListener('change', (e) => { s.reminder = e.target.value; Store.save(); });
         $('#addCal', root).addEventListener('click', () => { UI.download('prana-daily-practice.ics', makeICS(s.reminder), 'text/calendar'); toast('Open the downloaded file to add it to your calendar'); });
@@ -722,7 +799,7 @@
           const f = e.target.files[0]; if (!f) return;
           try { Store.importJSON(await f.text()); applyTheme(); toast('Backup restored'); render(); } catch (err) { toast('Could not import: ' + err.message); }
         });
-        $('#resetBtn', root).addEventListener('click', () => { if (confirm('Erase all sessions, results, programs and settings on this device? This cannot be undone.')) { Store.reset(); applyTheme(); location.hash = '#/'; render(); } });
+        $('#resetBtn', root).addEventListener('click', () => { if (confirm(Sync.user ? 'Erase all sessions, results, programs and settings on this device AND in your account (on all your synced devices)? This cannot be undone.' : 'Erase all sessions, results, programs and settings on this device? This cannot be undone.')) { Store.reset(); applyTheme(); location.hash = '#/'; render(); } });
       }
     };
   }
@@ -737,6 +814,153 @@
       'SUMMARY:Prana — breathe, move, meditate', 'DESCRIPTION:A few minutes of practice keeps your streak alive.', 'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:Time for your Prana practice', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
   }
 
+  // ---------------------------------------------------------------------------
+  // Account & sync
+  // ---------------------------------------------------------------------------
+  function syncStatusText() {
+    const s = Sync.state;
+    if (s.status === 'syncing') return 'Syncing…';
+    if (s.status === 'offline') return 'Offline — will sync when you’re back online';
+    if (s.status === 'error') return 'Sync problem: ' + (s.error || 'unknown error');
+    if (s.lastSync) {
+      const m = Math.round((Date.now() - s.lastSync) / 60000);
+      return 'Synced ' + (m < 1 ? 'just now' : m < 60 ? m + ' min ago' : new Date(s.lastSync).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }));
+    }
+    return 'Sync on';
+  }
+
+  function account() {
+    const base = { tab: null, title: 'Account', back: '#/settings' };
+    if (!Sync.enabled) return Object.assign(base, { html: '<div class="page-head"><h1>Account</h1><p>Accounts aren’t switched on for this copy of Prana yet.</p></div>' });
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    if (!Sync.ready) {
+      return Object.assign(base, {
+        html: '<div class="page-head"><h1>Account</h1><p class="muted" data-acc-loading>Connecting…</p></div>',
+        after(root) {
+          Sync.getClient().then(() => { if (current && current.title === 'Account') render(true); })
+            .catch((e) => { const p = $('[data-acc-loading]', root); if (p) p.textContent = e.message; });
+        }
+      });
+    }
+    const u = Sync.user;
+    if (u && params.has('reset')) {
+      return Object.assign(base, {
+        html: `<div class="page-head"><h1>Choose a new password</h1><p>For ${esc(u.email)}</p></div>
+        <form class="card auth-form" id="pwForm" novalidate>
+          <label class="fl">New password<input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+          <div class="form-msg" role="alert"></div>
+          <button class="btn btn-primary btn-block" type="submit">Save password</button>
+        </form>`,
+        after(root) { bindPwForm(root, () => { toast('Password updated'); location.hash = '#/account'; }); }
+      });
+    }
+    if (u) {
+      const initial = (u.email || '?')[0].toUpperCase();
+      return Object.assign(base, {
+        html: `
+        <div class="page-head"><h1>Account</h1></div>
+        <div class="card">
+          <div class="row" style="gap:14px"><div class="avatar">${esc(initial)}</div><div style="min-width:0"><b style="word-break:break-all">${esc(u.email)}</b><div class="small muted" data-sync-status>${esc(syncStatusText())}</div></div></div>
+          <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap"><button class="btn btn-sm btn-primary" data-acc="sync">${ICON.repeat} Sync now</button><button class="btn btn-sm" data-acc="signout">Sign out</button></div>
+        </div>
+        <p class="small muted" style="margin:12px 4px">Your sessions, streaks, personal bests, programs and settings sync automatically across every device signed in to this account. Everything keeps working offline and syncs when you reconnect.</p>
+        ${section('Change password')}
+        <form class="card auth-form" id="pwForm" novalidate>
+          <label class="fl">New password<input class="input" type="password" name="password" autocomplete="new-password" minlength="8" required></label>
+          <div class="form-msg" role="alert"></div>
+          <button class="btn btn-block" type="submit">Update password</button>
+        </form>
+        ${section('Delete account')}
+        <div class="card"><p class="small muted">Permanently deletes your account and the copy of your data stored in the cloud. Data on this device is kept. This can’t be undone.</p><button class="btn btn-sm btn-danger" data-acc="delete" style="margin-top:12px">Delete my account</button></div>`,
+        after(root) {
+          bindPwForm(root, () => { toast('Password updated'); $('#pwForm input', root).value = ''; });
+          root.addEventListener('click', async (e) => {
+            const b = e.target.closest('[data-acc]'); if (!b) return;
+            const act = b.dataset.acc;
+            try {
+              if (act === 'sync') { await Sync.syncNow(); toast(Sync.state.status === 'error' ? Sync.state.error : 'Synced'); }
+              else if (act === 'signout') {
+                if (!confirm('Sign out? Your progress is saved to your account and removed from this device. Sign in again to get it back.')) return;
+                b.disabled = true; await Sync.signOut(); toast('Signed out'); location.hash = '#/settings';
+              } else if (act === 'delete') {
+                const typed = prompt('This permanently deletes your Prana account and its cloud data. Type DELETE to confirm.');
+                if (typed !== 'DELETE') return;
+                b.disabled = true; await Sync.deleteAccount(); toast('Account deleted'); location.hash = '#/settings';
+              }
+            } catch (err) { b.disabled = false; toast(err.message); }
+          });
+        }
+      });
+    }
+    const mode = st.authMode || 'signin';
+    const err = params.get('error');
+    return Object.assign(base, {
+      html: `
+      <div class="page-head"><h1>${mode === 'signup' ? 'Create your account' : 'Sign in'}</h1><p>Keep your streaks, personal bests and programs in sync on every device.</p></div>
+      <div class="seg" data-seg="authMode"><button class="${mode === 'signin' ? 'active' : ''}" data-v="signin">Sign in</button><button class="${mode === 'signup' ? 'active' : ''}" data-v="signup">Create account</button></div>
+      <form class="card auth-form" id="authForm" novalidate>
+        <label class="fl">Email<input class="input" type="email" name="email" autocomplete="email" inputmode="email" required></label>
+        <label class="fl">Password<input class="input" type="password" name="password" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" minlength="${mode === 'signup' ? 8 : 1}" required>${mode === 'signup' ? '<span class="hint">At least 8 characters</span>' : ''}</label>
+        <div class="form-msg ${err ? 'err' : ''}" role="alert">${err ? esc(err) : ''}</div>
+        <button class="btn btn-primary btn-block" type="submit">${mode === 'signup' ? 'Create account' : 'Sign in'}</button>
+        ${mode === 'signin' ? '<button type="button" class="link center-link" data-acc="forgot">Forgot password?</button>' : ''}
+      </form>
+      <div class="or-row"><span>or</span></div>
+      <button class="btn btn-block" data-acc="magic">${ICON.sparkle} Email me a sign-in link</button>
+      <p class="small muted" style="margin:14px 4px">Progress already on this device will be added to your account.</p>`,
+      after(root) {
+        const form = $('#authForm', root), msg = $('.form-msg', form);
+        const say = (t, ok) => { msg.textContent = t; msg.className = 'form-msg ' + (ok ? 'ok' : 'err'); };
+        const email = () => form.email.value.trim();
+        const validEmail = () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email());
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          if (!validEmail()) return say('Enter a valid email address.');
+          const pw = form.password.value;
+          if (mode === 'signup' && pw.length < 8) return say('Password must be at least 8 characters.');
+          if (!pw) return say('Enter your password.');
+          const btn = $('button[type=submit]', form); btn.disabled = true; say('', true);
+          try {
+            if (mode === 'signup') {
+              const r = await Sync.signUp(email(), pw);
+              if (r.needsConfirm) say(`Almost done! We sent a confirmation link to ${email()}. Open it on this device to finish.`, true);
+              else { toast('Account created — syncing your progress'); location.hash = '#/account'; }
+            } else {
+              await Sync.signIn(email(), pw);
+              toast('Signed in — syncing your progress'); location.hash = '#/account';
+            }
+          } catch (er) { say(er.message); } finally { btn.disabled = false; }
+        });
+        root.addEventListener('click', async (e) => {
+          const b = e.target.closest('[data-acc]'); if (!b) return;
+          if (!validEmail()) { say('Enter your email address first.'); form.email.focus(); return; }
+          b.disabled = true;
+          try {
+            if (b.dataset.acc === 'magic') { await Sync.magicLink(email()); say(`Check your inbox — we sent a sign-in link to ${email()}.`, true); }
+            else if (b.dataset.acc === 'forgot') { await Sync.resetPassword(email()); say(`If an account exists for ${email()}, a password-reset link is on its way.`, true); }
+          } catch (er) { say(er.message); } finally { b.disabled = false; }
+        });
+      }
+    });
+  }
+  function bindPwForm(root, onOk) {
+    const f = $('#pwForm', root); if (!f) return;
+    const msg = $('.form-msg', f);
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pw = f.password.value;
+      if (pw.length < 8) { msg.textContent = 'Password must be at least 8 characters.'; msg.className = 'form-msg err'; return; }
+      const b = $('button[type=submit]', f); b.disabled = true;
+      try { await Sync.updatePassword(pw); onOk(); } catch (er) { msg.textContent = er.message; msg.className = 'form-msg err'; } finally { b.disabled = false; }
+    });
+  }
+  function accountCard() {
+    if (!Sync.enabled) return '';
+    const u = Sync.user;
+    if (u) return `<a class="card account-card" href="#/account"><div class="avatar">${esc((u.email || '?')[0].toUpperCase())}</div><div style="flex:1;min-width:0"><b style="display:block;overflow:hidden;text-overflow:ellipsis">${esc(u.email)}</b><span class="small muted" data-sync-status>${esc(syncStatusText())}</span></div><span class="chev">${ICON.chev}</span></a>`;
+    return `<a class="card account-card" href="#/account"><div class="avatar">${ICON.repeat}</div><div style="flex:1"><b>Sign in to sync</b><span class="small muted" style="display:block">Your progress on all your devices</span></div><span class="chev">${ICON.chev}</span></a>`;
+  }
+
   function notFound() { return { tab: null, title: 'Not found', back: '#/', html: '<div class="page-head"><h1>Not found</h1><p>That page doesn’t exist.</p></div><a class="btn" href="#/">Go home</a>' }; }
 
   // ---------------------------------------------------------------------------
@@ -748,7 +972,7 @@
     [/^\/yoga$/, yogaList], [/^\/flow\/([\w-]+)$/, flowDetail], [/^\/pose\/([\w-]+)$/, poseDetail],
     [/^\/mind$/, mindList], [/^\/meditation\/([\w-]+)$/, medDetail],
     [/^\/programs$/, programsList], [/^\/program\/([\w-]+)$/, programDetail],
-    [/^\/progress$/, progress], [/^\/settings$/, settings]
+    [/^\/progress$/, progress], [/^\/settings$/, settings], [/^\/account$/, account]
   ];
   let current = null, navCount = 0;
 
@@ -759,7 +983,7 @@
     let v = null;
     for (const [re, fn] of routes) { const m = path.match(re); if (m) { v = fn(m[1]); break; } }
     if (!v) v = notFound();
-    if (!Store.data.profile.onboarded && path !== '/') { v = onboarding(); }
+    if (!Store.data.profile.onboarded && path !== '/' && path !== '/account') { v = onboarding(); }
     current = v;
     view.style.setProperty('--accent', v.accent || 'var(--breathe)');
     view.innerHTML = v.html;
@@ -778,17 +1002,31 @@
   // Delegated interactions within views
   view.addEventListener('click', (e) => {
     if (e.target.closest('[data-install]')) { PWA.install(); return; }
+    if (e.target.closest('[data-sync-hide]')) { S().hideSyncNudge = true; Store.save(); toast('You can sign in any time from Settings'); render(true); return; }
     if (e.target.closest('[data-install-hide]')) { S().hideInstall = true; Store.save(); toast('You can install any time from Settings'); render(true); return; }
     const s = e.target.closest('[data-start]');
     if (s) {
       e.preventDefault();
-      const desc = JSON.parse(s.dataset.start);
-      if (desc.kind === 'flow' && desc.id === 'surya' && s.dataset.pace) {
-        const f = Content.flow('surya'); const old = f.pace; f.pace = +s.dataset.pace;
-        Play.start(desc); f.pace = old;
-      } else Play.start(desc);
+      Play.start(JSON.parse(s.dataset.start));
       return;
     }
+    const vb = e.target.closest('[data-view]');
+    if (vb) {
+      const v = vb.dataset.view;
+      S().view = v; Store.save();
+      liveFigs.forEach((f) => f.setView(v));
+      $$('[data-view]', view).forEach((b) => { b.classList.toggle('active', b === vb); b.setAttribute('aria-pressed', String(b === vb)); });
+      return;
+    }
+    const sb = e.target.closest('[data-speed]');
+    if (sb) {
+      st.speed = SPEEDS[(SPEEDS.indexOf(st.speed || 1) + 1) % SPEEDS.length];
+      liveFigs.forEach((f) => f.setSpeed(st.speed));
+      sb.textContent = speedLabel(st.speed);
+      return;
+    }
+    const rw = e.target.closest('[data-reset-wk]');
+    if (rw) { delete PF().wk[rw.dataset.resetWk]; Store.save(); render(true); return; }
     const seg = e.target.closest('[data-seg] button');
     if (seg) { st[seg.parentElement.dataset.seg] = seg.dataset.v; render(true); return; }
     const chip = e.target.closest('[data-chips] .chip');
@@ -799,6 +1037,7 @@
       if (key === 'obGoal') { $$('button', pk.parentElement).forEach((b) => b.classList.toggle('active', b === pk)); return; }
       const val = isNaN(+pk.dataset.v) ? pk.dataset.v : +pk.dataset.v;
       if (key === 'goal') { S().goal = val; Store.save(); }
+      else if (key.startsWith('p:')) setPref(key.slice(2), val);
       else st[key] = val;
       render(true);
     }
@@ -825,6 +1064,16 @@
 
   applyTheme();
   render();
+
+  // Sync events: refresh when merged data arrives, route email-link results.
+  Sync.on((evt) => {
+    if (evt === 'data' || evt === 'auth') { applyTheme(); if (!Play.active) render(true); return; }
+    if (evt === 'state') { $$('[data-sync-status]').forEach((n) => { n.textContent = syncStatusText(); }); return; }
+    if (evt === 'recovery') { location.hash = '#/account?reset=1'; return; }
+    if (evt && evt.type === 'link-signed-in') toast('Signed in — your progress is syncing');
+    if (evt && evt.type === 'link-error') { location.hash = '#/account?error=' + encodeURIComponent(evt.message); }
+  });
+  Sync.boot();
 
   // ---------------------------------------------------------------------------
   // Service worker: offline support + "update available" prompt

@@ -111,20 +111,26 @@
     return phases.map(([k, d, label]) => ({ k, d, label: label || LABELS[k], cycle: cycleIdx }));
   }
 
-  function buildBreath(b, minutes) {
+  const restSeg = (d, sub) => ({ k: 'rest', d, label: 'Rest', sub: sub || 'Breathe naturally. The next round starts soon.', isRest: true });
+
+  /** opts.rest: seconds of natural breathing between rounds (0 = continuous). */
+  function buildBreath(b, minutes, opts = {}) {
     const segs = [{ k: 'rest', d: 5, label: 'Settle in', sub: 'Sit comfortably and soften your shoulders.' }];
+    const rest = opts.rest != null ? +opts.rest : null;
     if (b.stages) {
       const total = b.stages.reduce((a, s) => a + s.minutes, 0);
       const scale = (minutes || total) / total;
       let c = 0;
-      for (const st of b.stages) {
+      b.stages.forEach((st, si) => {
+        if (si > 0 && rest) segs.push(restSeg(rest, 'Breathe naturally. The rhythm slows down next.'));
         const len = st.phases.reduce((a, p) => a + p[1], 0);
         const n = Math.max(1, Math.round((st.minutes * scale * 60) / len));
         for (let i = 0; i < n; i++) segs.push(...phasesToSegs(st.phases, ++c));
-      }
+      });
       return segs;
     }
     if (b.mode === 'pumps' || b.mode === 'bellows') {
+      if (rest != null) b = Object.assign({}, b, { rest: Math.max(10, rest) });
       const rounds = Math.max(1, Math.round(b.rounds * ((minutes || b.minutes) / b.minutes)));
       for (let r = 1; r <= rounds; r++) {
         segs.push({ k: 'in', d: 3, label: 'Deep breath in', sub: `Round ${r} of ${rounds}`, cycle: r });
@@ -139,7 +145,7 @@
           }
         }
         segs.push({ k: 'out', d: 4, label: 'Exhale fully', cycle: r });
-        segs.push({ k: 'rest', d: b.rest, label: 'Breathe naturally', sub: 'Notice the stillness and energy.', cycle: r });
+        segs.push({ k: 'rest', d: b.rest, label: 'Rest', sub: r < rounds ? 'Breathe naturally. Notice the stillness and energy.' : 'Breathe naturally and enjoy the stillness.', cycle: r, isRest: true });
       }
       return segs;
     }
@@ -154,15 +160,23 @@
         segs.push({ k: 'in', d: 2.5, label: 'Recovery breath', sub: 'Big breath in…', cycle: r });
         segs.push({ k: 'hold', d: 15, label: 'Hold', sub: 'Hold the recovery breath.', cycle: r });
         segs.push({ k: 'out', d: 3, label: 'Release', cycle: r });
-        if (r < rounds) segs.push({ k: 'rest', d: 8, label: 'Get ready', sub: `Round ${r + 1} starts soon.`, cycle: r });
+        if (r < rounds) segs.push({ k: 'rest', d: rest != null ? Math.max(5, rest) : 15, label: 'Rest', sub: `Breathe normally. Round ${r + 1} starts soon.`, cycle: r, isRest: true });
       }
       return segs;
     }
     const len = b.phases.reduce((a, p) => a + p[1], 0);
     const cycles = Math.max(1, Math.round(((minutes || b.minutes) * 60) / len));
-    for (let i = 1; i <= cycles; i++) segs.push(...phasesToSegs(b.phases, i));
+    // With rest enabled, split the session into ~2-minute rounds separated by natural breathing.
+    const per = rest ? Math.max(1, Math.round(120 / len)) : cycles;
+    for (let i = 1; i <= cycles; i++) {
+      if (rest && i > 1 && (i - 1) % per === 0) segs.push(restSeg(rest));
+      segs.push(...phasesToSegs(b.phases, i));
+    }
     return segs;
   }
+  /** Default rest between breathing rounds: continuous techniques flow without breaks unless asked. */
+  const breathRestDefault = (b) => (b.mode === 'pumps' || b.mode === 'bellows') ? b.rest : b.mode === 'power' ? 15 : 0;
+  const breathRestOptions = (b) => (b.mode === 'pumps' || b.mode === 'bellows') ? [15, 30, 45, 60] : b.mode === 'power' ? [10, 15, 30, 60] : [0, 15, 30, 60];
 
   // ===========================================================================
   // Breath challenges — tests and trainers with recorded results
@@ -343,7 +357,55 @@
     child_pose: { name: 'Child’s Pose', frames: [['child', 2, 0]], muscles: 'Recovery · back stretch', level: 'Beginner',
       steps: ['Kneel and sit back toward your heels.', 'Fold forward, forehead to the floor, arms extended.', 'Breathe into your back.'], tips: ['Widen the knees for more room'] }
   };
-  for (const id in EX) EX[id].id = id;
+  // Step captions, one per keyframe (shown while moving into / holding that frame).
+  const STEP_LABELS = {
+    jumping_jacks: ['Feet together', 'Jump', 'Arms & legs wide', 'Jump'],
+    high_knees: ['Right knee up', 'Left knee up'],
+    march: ['Lift the knee', 'Switch legs'],
+    squats: ['Drive up through the heels', 'Sit back & down'],
+    squat_jumps: ['Land softly', 'Load the squat', 'Explode up'],
+    reverse_lunges: ['Push back to standing', 'Step back & lower'],
+    side_lunges: ['Back to centre', 'Shift right', 'Back to centre', 'Shift left'],
+    pushups: ['Press up', 'Lower the chest'],
+    plank: ['Hold one straight line'],
+    side_plank: ['Lift the hips'],
+    mountain_climbers: ['Right knee in', 'Left knee in'],
+    burpees: ['Stand', 'Hands to the floor', 'Jump back to plank', 'Jump feet in', 'Rise', 'Jump!'],
+    crunches: ['Lower with control', 'Curl up — exhale'],
+    leg_raises: ['Lower slowly', 'Lift the legs'],
+    flutter_kicks: ['Kick', 'Kick'],
+    glute_bridge: ['Lower slowly', 'Lift hips & squeeze'],
+    superman: ['Relax', 'Lift arms, chest & legs'],
+    wall_sit: ['Hold — thighs level'],
+    calf_raises: ['Lower slowly', 'Rise onto the toes'],
+    side_bends: ['Reach & bend right', 'Back to centre', 'Reach & bend left', 'Back to centre'],
+    hip_hinge: ['Stand tall', 'Hinge with a flat back'],
+    cat_cow: ['Cow — inhale', 'Cat — exhale'],
+    bird_dog: ['Tabletop', 'Reach & extend'],
+    cobra_stretch: ['Lie down', 'Lift the chest'],
+    forward_fold: ['Stand tall', 'Fold forward'],
+    child_pose: ['Rest & breathe']
+  };
+  /** Body segments to highlight, derived from the "muscles worked" text. */
+  function highlightFor(m) {
+    m = m.toLowerCase();
+    const s = new Set();
+    if (/full body/.test(m)) ['thigh', 'shin', 'torso', 'hips', 'uarm', 'farm', 'shoulders'].forEach((x) => s.add(x));
+    if (/quad|hamstring|thigh|\blegs?\b|hip flexor/.test(m)) s.add('thigh');
+    if (/glute|\bhips\b/.test(m)) { s.add('hips'); s.add('thigh'); }
+    if (/calf|calves|ankle/.test(m)) s.add('shin');
+    if (/core|abs|oblique|back|spine/.test(m)) s.add('torso');
+    if (/chest|shoulder/.test(m)) { s.add('shoulders'); s.add('uarm'); }
+    if (/tricep|\barms?\b/.test(m)) { s.add('uarm'); s.add('farm'); }
+    return [...s];
+  }
+  for (const id in EX) {
+    const e = EX[id];
+    e.id = id;
+    e.hl = highlightFor(e.muscles);
+    const labels = STEP_LABELS[id];
+    if (labels) e.frames = e.frames.map((f, i) => [f[0], f[1], f[2], labels[i] || null]);
+  }
 
   // ===========================================================================
   // Workouts
@@ -472,9 +534,17 @@
     { id: 'backbends', name: 'Heart Opener', tag: 'Gentle backbends for posture and energy', level: 'Intermediate', icon: 'heart',
       items: [['marjaryasana', 40], ['bhujangasana', 20], ['balasana', 30], ['anjaneyasana', 30], ['dhanurasana', 20], ['balasana', 30], ['setu_bandhasana', 30], ['shavasana', 90]] }
   ];
-  function flowSeconds(f, rounds) {
-    if (f.type === 'surya') return (rounds || f.rounds) * 24 * f.pace + 10;
-    return f.items.reduce((a, [id, s]) => a + s * ((yogaById(id) || {}).sides ? 2 : 1), 0) + 10;
+  /** o: {rounds, pace, roundRest, pause} */
+  function flowSeconds(f, o = {}) {
+    if (typeof o === 'number') o = { rounds: o };
+    if (f.type === 'surya') {
+      const rounds = o.rounds || f.rounds, pace = o.pace || f.pace;
+      return rounds * 24 * pace + (rounds - 1) * (o.roundRest != null ? o.roundRest : 15) + 8;
+    }
+    const pause = o.pause != null ? o.pause : 5;
+    let holds = 0, n = 0;
+    for (const [id, s] of f.items) { const k = (yogaById(id) || {}).sides ? 2 : 1; holds += s * k; n += k; }
+    return holds + (n - 1) * pause + 8;
   }
 
   // ===========================================================================
@@ -531,6 +601,6 @@
     flow: (id) => FLOWS.find((f) => f.id === id),
     program: (id) => PROGRAMS.find((p) => p.id === id),
     yoga: yogaById,
-    buildBreath, workoutSeconds, flowSeconds, suryaSteps, todayPlan
+    buildBreath, breathRestDefault, breathRestOptions, workoutSeconds, flowSeconds, suryaSteps, todayPlan
   };
 })();

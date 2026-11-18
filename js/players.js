@@ -162,11 +162,13 @@
         </div>
         <div class="b-sub"></div>
         <div class="b-tap" hidden><button class="btn btn-light" data-act="tap">I need to breathe</button></div>
+        <div class="rest-ctl" hidden><button class="rest-btn" data-act="addrest">+10s</button><button class="rest-btn" data-act="skiprest">Skip rest ${ICON.next}</button></div>
         <div class="b-meta"><span class="b-cycle"></span><span class="b-left"></span></div>`;
       this.controls.innerHTML = this.pauseButton();
       this.el = {
         orb: $('.orb', this.body), ring: $('.orb-ring .fg', this.body), label: $('.b-label', this.body), count: $('.b-count', this.body),
-        sub: $('.b-sub', this.body), tap: $('.b-tap', this.body), cycle: $('.b-cycle', this.body), left: $('.b-left', this.body), prog: $('.pl-progress i', this.bar)
+        sub: $('.b-sub', this.body), tap: $('.b-tap', this.body), cycle: $('.b-cycle', this.body), left: $('.b-left', this.body), prog: $('.pl-progress i', this.bar),
+        restCtl: $('.rest-ctl', this.body)
       };
       this.planned = this.segs.reduce((a, s) => a + (s.d || 0), 0);
       this.enter(0);
@@ -203,6 +205,7 @@
       this.el.label.textContent = s.label || '';
       this.el.sub.textContent = s.sub || '';
       this.el.tap.hidden = s.k !== 'free';
+      this.el.restCtl.hidden = !(s.isRest && s.d >= 8);
       this.el.cycle.textContent = s.cycle ? (s.pump ? `${s.pump} / ${s.of}` : `Cycle ${s.cycle}`) : '';
       // cues
       if (!s.quiet) {
@@ -254,6 +257,10 @@
         if (s.rec) this.record(s.rec, this.segT);
         Sound.go();
         this.enter(this.idx + 1);
+      } else if (a === 'skiprest' && s && s.isRest) {
+        this.enter(this.idx + 1);
+      } else if (a === 'addrest' && s && s.isRest) {
+        s.d += 10; this.planned += 10; this.render();
       }
     }
     onPause(p) {
@@ -276,9 +283,12 @@
   // ===========================================================================
   function exDemo(id) {
     const e = Content.EX[id];
-    return { frames: e.frames, anchor: e.anchor || 'hip', prop: e.prop || null };
+    return { frames: e.frames, anchor: e.anchor || 'hip', prop: e.prop || null, hl: e.hl };
   }
-  function framesFrom(list) { return list.map(([n, h, t]) => ({ pose: Poses.get(n), h, t })); }
+  function framesFrom(list) { return list.map(([n, h, t, label]) => ({ pose: Poses.get(n), h, t, label })); }
+  const VIEW_ORDER = ['auto', 'q', 'front', 'side', 'orbit'];
+  /** The picture-in-picture shows a complementary angle to the main view. */
+  const pipViewFor = (v) => (v === 'q' || v === 'orbit' ? 'side' : 'q');
 
   class TimedSession extends Session {
     constructor(o) { super(o); this.items = o.items; this.i = -1; }
@@ -286,13 +296,20 @@
       this.open();
       this.bar.innerHTML = '<div class="pl-progress"><i></i></div>';
       this.body.innerHTML = `
-        <div class="tm-stage"><div class="fig-box"></div><div class="tm-badge" hidden></div></div>
+        <div class="tm-stage">
+          <div class="fig-box"></div>
+          <div class="tm-badge" hidden></div>
+          <button class="tm-view" data-act="view" aria-label="Change camera angle"></button>
+          <button class="tm-pip" data-act="pip" aria-label="Second camera angle — tap to hide"><div class="pip-box"></div></button>
+        </div>
+        <div class="tm-cap-row"><span class="stage-cap tm-cap"></span></div>
         <div class="tm-info"><div class="tm-name"></div><div class="tm-sub"></div><div class="tm-breath" hidden></div></div>
         <div class="tm-row">
           <div class="tm-timer"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="44"/><circle class="fg" cx="50" cy="50" r="44" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><div class="tm-time"></div></div>
           <div class="tm-reps" hidden><b></b><span class="small" style="opacity:.7">reps</span></div>
         </div>
         <div class="tm-cue"></div>
+        <div class="rest-ctl" hidden><button class="rest-btn" data-act="addrest">+10s</button><button class="rest-btn" data-act="next">Skip rest ${ICON.next}</button></div>
         <div class="tm-next"></div>`;
       this.controls.innerHTML = `
         <button class="pl-btn" data-act="prev" aria-label="Previous">${ICON.prev}</button>
@@ -301,44 +318,62 @@
       const q = (s) => $(s, this.root);
       this.el = {
         box: q('.fig-box'), badge: q('.tm-badge'), name: q('.tm-name'), sub: q('.tm-sub'), breath: q('.tm-breath'),
-        timer: q('.tm-timer'), ring: q('.tm-timer .fg'), time: q('.tm-time'), cue: q('.tm-cue'), next: q('.tm-next'), prog: q('.pl-progress i')
+        timer: q('.tm-timer'), ring: q('.tm-timer .fg'), time: q('.tm-time'), cue: q('.tm-cue'), next: q('.tm-next'), prog: q('.pl-progress i'),
+        restCtl: q('.rest-ctl'), view: q('.tm-view'), pip: q('.tm-pip'), pipBox: q('.pip-box'), cap: q('.tm-cap')
       };
-      this.fig = new Figure(this.el.box, { anchor: 'hip' });
+      const view = Store.data.settings.view || 'auto';
+      this.fig = new Figure(this.el.box, { anchor: 'hip', view, onPhase: (i, label) => { this.el.cap.textContent = label || ''; } });
+      this.pip = new Figure(this.el.pipBox, { anchor: 'hip', view: pipViewFor(view), fit: 'tight', label: 'Second camera angle' });
+      this.el.pip.hidden = Store.data.settings.pip === false;
+      this.updateViewBtn();
       this.planned = this.items.reduce((a, it) => a + it.sec, 0);
       this.enter(0);
     }
-    cleanup() { if (this.fig) { this.fig.destroy(); this.fig = null; } }
+    cleanup() {
+      if (this.fig) { this.fig.destroy(); this.fig = null; }
+      if (this.pip) { this.pip.destroy(); this.pip = null; }
+    }
+    updateViewBtn() {
+      const v = Store.data.settings.view || 'auto';
+      this.el.view.innerHTML = `${ICON.repeat}<span>${Figure.VIEW_LABEL[v]}</span>`;
+    }
+    figs() { return [this.fig, this.pip].filter(Boolean); }
     nextMain(from) { for (let j = from + 1; j < this.items.length; j++) if (this.items[j].kind !== 'rest') return this.items[j]; return null; }
     enter(i) {
       if (i >= this.items.length) { this.finish(true); return; }
       this.i = i; this.t = 0; this.cueIdx = 0; this.cueT = 0;
       const it = this.items[i];
       const nxt = this.nextMain(i);
-      const showDemo = it.kind === 'rest' && nxt ? nxt : it;
+      const showDemo = it.kind === 'rest' && !it.demo && nxt ? nxt : it;
       const d = showDemo.demo;
+      this.el.cap.textContent = '';
       if (d && this.fig) {
-        if (d.frames) {
-          this.fig.loop(framesFrom(d.frames), { anchor: d.anchor || 'hip', flip: !!d.flip, prop: d.prop || null, speed: it.kind === 'rest' ? 0.6 : 1 });
-        } else if (d.pose) {
-          const pose = Poses.get(d.pose);
-          const smooth = this.fig.mode === 'show';
-          this.fig.o.prop = null; this.fig.o.speed = 1;
-          this.fig.show(pose, { dur: smooth ? (d.dur || 1.3) : 0, anchor: d.anchor || pose.anchor || 'hip', flip: !!d.flip });
+        for (const f of this.figs()) {
+          if (d.frames) {
+            f.loop(framesFrom(d.frames), { anchor: d.anchor || 'hip', flip: !!d.flip, prop: d.prop || null, speed: it.kind === 'rest' ? 0.6 : 1, hl: d.hl || null });
+          } else if (d.pose) {
+            const pose = Poses.get(d.pose);
+            const smooth = f.mode === 'show';
+            f.o.prop = null; f.o.speed = 1; f.o.hl = null;
+            f.show(pose, { dur: smooth ? (d.dur || 1.3) : 0, anchor: d.anchor || pose.anchor || 'hip', flip: !!d.flip });
+          }
         }
       }
-      this.el.badge.hidden = !(it.kind === 'rest' || it.kind === 'prep');
-      this.el.badge.textContent = it.kind === 'rest' ? 'REST · NEXT UP' : 'GET READY';
-      this.el.name.textContent = it.kind === 'rest' && nxt ? nxt.name : it.name;
-      this.el.sub.textContent = it.kind === 'rest' ? (it.name || 'Rest') : (it.sub || '');
+      const isRest = it.kind === 'rest';
+      this.el.badge.hidden = !(isRest || it.kind === 'prep');
+      this.el.badge.textContent = isRest ? (it.badge || 'REST · NEXT UP') : 'GET READY';
+      this.el.name.textContent = isRest && nxt ? nxt.name : it.name;
+      this.el.sub.textContent = isRest ? (it.name || 'Rest') : (it.sub || '');
       this.el.breath.hidden = !it.breath;
       this.el.breath.textContent = it.breath || '';
-      this.el.next.textContent = nxt && it.kind !== 'rest' ? 'Next: ' + nxt.name : '';
-      this.cues = (it.kind === 'rest' && nxt ? nxt.cues : it.cues) || [];
+      this.el.next.textContent = nxt && !isRest ? 'Next: ' + nxt.name : '';
+      this.cues = (isRest ? (it.cues || (nxt && nxt.cues)) : it.cues) || [];
       this.el.cue.textContent = this.cues[0] || '';
+      this.el.restCtl.hidden = !(isRest && it.sec >= 8);
       $('[data-act="prev"]', this.root).disabled = i === 0;
       // voice + sound
       if (it.kind === 'prep') Sound.speak(`Get ready. ${nxt ? 'First up: ' + nxt.name : ''}`);
-      else if (it.kind === 'rest') { Sound.ding(); Sound.speak(nxt ? `Rest. Next up: ${nxt.name}` : 'Rest'); }
+      else if (isRest) { Sound.ding(); Sound.speak(it.say || (nxt ? (it.trans ? `Next: ${nxt.name}` : `Rest. Next up: ${nxt.name}`) : 'Rest'), { rate: 0.95 }); }
       else if (it.kind === 'work') { Sound.go(); Sound.vibrate(60); Sound.speak(`${it.name}. ${it.sec} seconds. Go!`); }
       else if (it.kind === 'step') { Sound.ding(); Sound.speak(`${it.breath}. ${it.name}`, { rate: 1 }); }
       else if (it.kind === 'pose') { Sound.ding(); Sound.speak(`${it.name}${it.sub ? ', ' + it.sub : ''}. ${it.cues && it.cues[0] ? it.cues[0] : ''}`, { rate: 0.92 }); }
@@ -352,7 +387,7 @@
       if (it.kind !== 'step' && Math.ceil(after) < Math.ceil(before) && Math.ceil(after) <= 3 && Math.ceil(after) >= 1) Sound.beep();
       if (it.kind === 'work' && it.sec >= 30 && before > it.sec / 2 && after <= it.sec / 2) Sound.speak('Halfway there', { interrupt: false });
       if (it.kind === 'pose' && it.sec >= 45 && before > 10 && after <= 10) Sound.speak('Ten more seconds', { interrupt: false });
-      if (it.kind === 'work' && it.sideSwitch && before > it.sec / 2 && after <= it.sec / 2) { Sound.speak('Switch sides', { interrupt: false }); if (this.fig) this.fig.o.flip = !this.fig.o.flip; }
+      if (it.kind === 'work' && it.sideSwitch && before > it.sec / 2 && after <= it.sec / 2) { Sound.speak('Switch sides', { interrupt: false }); for (const f of this.figs()) f.o.flip = !f.o.flip; }
       if (this.cues.length > 1 && this.cueT > 7) { this.cueT = 0; this.cueIdx = (this.cueIdx + 1) % this.cues.length; this.el.cue.textContent = this.cues[this.cueIdx]; }
       if (this.t >= it.sec) { this.enter(this.i + 1); return; }
       this.render();
@@ -369,13 +404,25 @@
     }
     onAction(a) {
       if (a === 'next') this.enter(this.i + 1);
+      else if (a === 'addrest') { const it = this.items[this.i]; if (it && it.kind === 'rest') { it.sec += 10; this.planned += 10; this.render(); } }
+      else if (a === 'view') {
+        const s = Store.data.settings;
+        const v = VIEW_ORDER[(VIEW_ORDER.indexOf(s.view || 'auto') + 1) % VIEW_ORDER.length];
+        s.view = v; Store.save();
+        this.fig.setView(v); if (this.pip) this.pip.setView(pipViewFor(v));
+        this.updateViewBtn();
+        UI.toast(`Camera: ${Figure.VIEW_LABEL[v]}`);
+      } else if (a === 'pip') {
+        const s = Store.data.settings; s.pip = false; Store.save();
+        this.el.pip.hidden = true; UI.toast('Second angle hidden — turn it back on in Settings');
+      }
       else if (a === 'prev') {
         let j = this.i - 1;
         while (j > 0 && this.items[j].kind === 'rest') j--;
         this.enter(Math.max(0, j));
       }
     }
-    onPause(p) { if (this.fig) p ? this.fig.pause() : this.fig.play(); if (!p) this.el.cue.textContent = this.cues[this.cueIdx] || ''; else this.el.cue.textContent = 'Paused — tap play to continue'; }
+    onPause(p) { for (const f of this.figs()) p ? f.pause() : f.play(); if (!p) this.el.cue.textContent = this.cues[this.cueIdx] || ''; else this.el.cue.textContent = 'Paused — tap play to continue'; }
   }
 
   function workoutItems(w) {
@@ -390,38 +437,57 @@
       w.items.forEach((id, k) => {
         items.push(exItem(id));
         const last = k === w.items.length - 1;
-        if (!last) items.push({ kind: 'rest', name: 'Rest', sec: w.rest });
-        else if (r < w.rounds - 1) items.push({ kind: 'rest', name: `Round ${r + 1} done — breathe`, sec: w.roundRest || 30 });
+        if (!last) { if (w.rest > 0) items.push({ kind: 'rest', name: 'Rest — shake it out', sec: w.rest }); }
+        else if (r < w.rounds - 1) items.push({ kind: 'rest', name: `Round ${r + 1} of ${w.rounds} done — breathe`, sec: w.roundRest || 30, say: `Round ${r + 1} complete. Take a breather.` });
       });
     }
     return items;
+  }
+
+  /** Merge user-chosen work/rest/rounds into a workout definition. */
+  function workoutWith(w, desc) {
+    const o = Object.assign({}, w);
+    for (const k of ['work', 'rest', 'rounds', 'roundRest']) if (desc[k] != null) o[k] = +desc[k];
+    return o;
   }
 
   function poseItem(y, sec, flip, side) {
     const demo = y.flowFrames ? { frames: y.flowFrames, anchor: 'rhand' } : { pose: y.pose, flip };
     return { kind: 'pose', name: y.name, sub: side ? `${y.sk} · ${side} side` : y.sk, sec, demo, cues: [y.cue].concat(y.steps) };
   }
+  const transition = (sec, cue) => ({ kind: 'rest', name: 'Transition — move slowly into the next pose', badge: 'TRANSITION · NEXT', sec, trans: true, cues: cue ? [cue] : null });
 
-  function flowItems(f, rounds) {
+  /** o: {rounds, pace, roundRest, pause} */
+  function flowItems(f, o = {}) {
     const items = [];
     if (f.type === 'surya') {
+      const rounds = o.rounds || f.rounds, pace = o.pace || f.pace;
+      const roundRest = o.roundRest != null ? +o.roundRest : 15;
       items.push({ kind: 'prep', name: 'Surya Namaskar', sub: `${rounds} rounds · stand at the front of your mat`, sec: 8, demo: { pose: 'stand' }, cues: ['Stand tall at the top of your mat, feet together.'] });
       for (let r = 1; r <= rounds; r++) {
         for (const side of ['R', 'L']) {
-          Content.suryaSteps(side).forEach((s, k) => {
-            items.push({ kind: 'step', name: s.name, sub: `${s.sk} · round ${r}${side === 'R' ? 'a' : 'b'}`, breath: s.breath, sec: f.pace, demo: { pose: s.pose, anchor: s.anchor, dur: Math.min(1.6, f.pace * 0.45) }, cues: [s.cue] });
+          Content.suryaSteps(side).forEach((s) => {
+            items.push({ kind: 'step', name: s.name, sub: `${s.sk} · round ${r}${side === 'R' ? 'a' : 'b'}`, breath: s.breath, sec: pace, demo: { pose: s.pose, anchor: s.anchor, dur: Math.min(1.6, pace * 0.45) }, cues: [s.cue] });
           });
+        }
+        if (r < rounds && roundRest > 0) {
+          items.push({ kind: 'rest', name: `Round ${r} of ${rounds} done — stand and breathe`, badge: 'REST', sec: roundRest, demo: { pose: 'stand', anchor: 'lto' }, say: `Round ${r} complete. Stand tall and breathe.`, cues: ['Stand in Tadasana. Let your breath and heart rate settle.'] });
         }
       }
       return items;
     }
+    const pause = o.pause != null ? +o.pause : 5;
     const first = Content.yoga(f.items[0][0]);
     items.push({ kind: 'prep', name: first.name, sub: 'Get ready', sec: 8, demo: first.flowFrames ? { frames: first.flowFrames, anchor: 'rhand' } : { pose: first.pose }, cues: [first.cue] });
-    for (const [id, sec] of f.items) {
+    f.items.forEach(([id, sec], k) => {
       const y = Content.yoga(id);
-      if (y.sides) { items.push(poseItem(y, sec, false, 'Right')); items.push(poseItem(y, sec, true, 'Left')); }
-      else items.push(poseItem(y, sec, false));
-    }
+      if (k > 0 && pause > 0) items.push(transition(pause, y.steps[0]));
+      if (y.sides) {
+        items.push(poseItem(y, sec, false, 'Right'));
+        if (pause > 0) items.push(transition(pause, 'Release, then come into the other side.'));
+        items.push(poseItem(y, sec, true, 'Left'));
+      } else items.push(poseItem(y, sec, false));
+    });
     return items;
   }
 
@@ -473,17 +539,21 @@
   // ===========================================================================
   // Launcher
   // ===========================================================================
+  /** Remembered rest / timing choices (Settings → prefs). */
+  const prefs = () => Store.data.settings.prefs || {};
+
   function describe(desc) {
     switch (desc.kind) {
       case 'breath': { const b = Content.breath(desc.id); return { title: b.name, sub: `${desc.minutes || b.minutes} min · ${b.tag}`, cat: 'breathe', icon: 'wind', href: '#/breathe/' + b.id, min: desc.minutes || b.minutes }; }
       case 'challenge': { const c = Content.challenge(desc.id); return { title: c.name, sub: `~${c.minutes} min · ${c.tag}`, cat: 'challenge', icon: c.icon, href: '#/challenge/' + c.id, min: c.minutes }; }
       case 'workout': {
-        const w = desc.custom || Content.workout(desc.id);
+        const base = desc.custom || Content.workout(desc.id);
+        const w = desc.custom ? base : workoutWith(base, Object.assign({}, prefs().wk && prefs().wk[base.id], desc));
         const min = Math.round(Content.workoutSeconds(w) / 60);
         return { title: w.name, sub: `${min} min · ${w.tag || w.items.length + ' sets'}`, cat: 'move', icon: w.icon || 'move', href: desc.custom ? null : '#/workout/' + w.id, min };
       }
       case 'exercise': { const e = Content.EX[desc.id]; return { title: e.name, sub: `${fmt(desc.seconds)} hold`, cat: 'move', icon: 'target', href: '#/exercise/' + e.id, min: Math.ceil(desc.seconds / 60) }; }
-      case 'flow': { const f = Content.flow(desc.id); const min = Math.round(Content.flowSeconds(f, desc.rounds) / 60); return { title: f.name + (desc.rounds ? ` · ${desc.rounds} rounds` : ''), sub: `${min} min · ${f.tag}`, cat: 'yoga', icon: f.icon || 'lotus', href: '#/flow/' + f.id, min }; }
+      case 'flow': { const f = Content.flow(desc.id); const p = prefs(); const min = Math.round(Content.flowSeconds(f, { rounds: desc.rounds, pace: p.suryaPace, roundRest: p.suryaRest, pause: p.flowPause }) / 60); return { title: f.name + (desc.rounds ? ` · ${desc.rounds} rounds` : ''), sub: `${min} min · ${f.tag}`, cat: 'yoga', icon: f.icon || 'lotus', href: '#/flow/' + f.id, min }; }
       case 'pose': { const y = Content.yoga(desc.id); return { title: y.name, sub: y.sk, cat: 'yoga', icon: 'lotus', href: '#/pose/' + y.id, min: 1 }; }
       case 'meditation': { const m = Meditations.get(desc.id); return { title: m.name, sub: `${m.minutes} min · ${m.tag}`, cat: 'mind', icon: m.icon || 'moon', href: '#/meditation/' + m.id, min: m.minutes }; }
       case 'timer': return { title: `Silent Meditation`, sub: `${desc.minutes} min · bells mark the time`, cat: 'mind', icon: 'clock', href: '#/mind', min: desc.minutes };
@@ -498,7 +568,10 @@
     switch (desc.kind) {
       case 'breath': {
         const b = Content.breath(desc.id);
-        s = new BreathSession({ title: o.title || b.name, cat: 'breathe', kind: 'breath', ref: b.id, segs: Content.buildBreath(b, desc.minutes), onDone });        break;
+        const savedRest = prefs().breathRest && prefs().breathRest[b.id];
+        const rest = desc.rest != null ? desc.rest : (savedRest != null ? savedRest : Content.breathRestDefault(b));
+        s = new BreathSession({ title: o.title || b.name, cat: 'breathe', kind: 'breath', ref: b.id, segs: Content.buildBreath(b, desc.minutes, { rest }), onDone });
+        break;
       }
       case 'challenge': {
         const c = Content.challenge(desc.id);
@@ -506,30 +579,38 @@
         break;
       }
       case 'workout': {
-        const w = desc.custom || Content.workout(desc.id);
+        const base = desc.custom || Content.workout(desc.id);
+        const w = desc.custom ? base : workoutWith(base, Object.assign({}, prefs().wk && prefs().wk[base.id], desc));
         s = new TimedSession({ title: o.title || w.name, cat: 'move', kind: 'workout', ref: w.id || 'custom', items: workoutItems(w), onDone });
         break;
       }
       case 'exercise': {
         const e = Content.EX[desc.id];
-        const items = [
-          { kind: 'prep', name: e.name, sub: 'Get into position', sec: 6, demo: exDemo(e.id), cues: e.steps },
-          { kind: 'work', name: e.name, sub: e.muscles, sec: desc.seconds || 45, demo: exDemo(e.id), cues: e.steps.concat(e.tips || []), sideSwitch: e.id === 'side_plank' }
-        ];
+        const sets = Math.max(1, +(desc.sets || 1)), rest = desc.rest != null ? +desc.rest : 30;
+        const items = [{ kind: 'prep', name: e.name, sub: 'Get into position', sec: 6, demo: exDemo(e.id), cues: e.steps }];
+        for (let k = 1; k <= sets; k++) {
+          items.push({ kind: 'work', name: e.name, sub: sets > 1 ? `Set ${k} of ${sets} · ${e.muscles}` : e.muscles, sec: desc.seconds || 45, demo: exDemo(e.id), cues: e.steps.concat(e.tips || []), sideSwitch: e.id === 'side_plank' });
+          if (k < sets && rest > 0) items.push({ kind: 'rest', name: `Set ${k} done — rest`, sec: rest, say: `Set ${k} done. Rest.` });
+        }
         s = new TimedSession({ title: o.title || e.name, cat: 'move', kind: 'exercise', ref: e.id, items, onDone });
         break;
       }
       case 'flow': {
         const f = Content.flow(desc.id);
-        const rounds = desc.rounds || f.rounds;
-        s = new TimedSession({ title: o.title || f.name, cat: 'yoga', kind: 'flow', ref: f.id, items: flowItems(f, rounds), onDone });
+        const p = prefs();
+        const opts = {
+          rounds: desc.rounds || f.rounds, pace: desc.pace || p.suryaPace || f.pace,
+          roundRest: desc.roundRest != null ? desc.roundRest : p.suryaRest,
+          pause: desc.pause != null ? desc.pause : p.flowPause
+        };
+        s = new TimedSession({ title: o.title || f.name, cat: 'yoga', kind: 'flow', ref: f.id, items: flowItems(f, opts), onDone });
         break;
       }
       case 'pose': {
         const y = Content.yoga(desc.id);
         const sec = desc.seconds || y.hold;
         const items = [{ kind: 'prep', name: y.name, sub: 'Move into the pose', sec: 8, demo: y.flowFrames ? { frames: y.flowFrames, anchor: 'rhand' } : { pose: y.pose }, cues: y.steps }];
-        if (y.sides) { items.push(poseItem(y, sec, false, 'Right')); items.push(poseItem(y, sec, true, 'Left')); }
+        if (y.sides) { items.push(poseItem(y, sec, false, 'Right')); items.push(transition(8, 'Release, then come into the other side.')); items.push(poseItem(y, sec, true, 'Left')); }
         else items.push(poseItem(y, sec, false));
         s = new TimedSession({ title: o.title || y.name, cat: 'yoga', kind: 'pose', ref: y.id, items, onDone });
         break;
@@ -552,5 +633,5 @@
     s.start();
   }
 
-  window.Play = { start, describe, get active() { return active; }, RESULT_META };
+  window.Play = { start, describe, prefs, workoutWith, get active() { return active; }, RESULT_META };
 })();

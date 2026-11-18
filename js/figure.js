@@ -1,61 +1,87 @@
-/* Prana — articulated figure engine.
+/* Prana — articulated 3D figure engine.
  *
- * Poses are described with absolute segment angles in degrees:
- *   0 = pointing down, 90 = pointing right (the way a side-view figure faces),
- *   180 = pointing up, -90 = pointing left.
+ * Poses are authored with segment angles in degrees in ONE plane:
+ *   0 = pointing down, 90 = forward (side view: right), 180 = up, -90 = backward.
+ *   v:'s' (default) → angles live in the sagittal plane (side view);
+ *   v:'f'           → angles live in the frontal plane (front view: + = screen right).
  * Keys: t1/t2 lower/upper spine, hd head, la1/la2 & ra1/ra2 upper/fore arms,
- * ll1/ll2 & rl1/rl2 thigh/shin, lf/rf feet. In side view ('s') the "l" limbs are
- * the far side (drawn lighter). v:'f' renders a front view.
- * The figure is grounded automatically (its lowest body surface rests on the floor);
- * `ik: {l:{dx}, r:{dx}}` plants that hand on the floor dx units from the shoulder.
+ * ll1/ll2 & rl1/rl2 thigh/shin, lf/rf feet (side poses).
+ * The skeleton is built in 3D (X forward, Y down, Z lateral), rested on the floor
+ * (lowest body surface at Y = 0), and projected through a camera that can orbit:
+ * side, front, three-quarter, or a slow 360° turn. Hands with `ik:{l:{dx},r:{dx}}`
+ * are planted on the floor dx units forward of the shoulder.
  */
 (function () {
   'use strict';
-  const L = { t1: 26, t2: 26, neck: 5, head: 10, ua: 28, fa: 30, th: 44, sh: 42, ft: 13, ftF: 7, sw: 16, hw: 9, shOff: 4 };
+  const L = { t1: 26, t2: 26, neck: 5, head: 10, ua: 28, fa: 30, th: 44, sh: 42, ft: 13, sw: 16, hw: 9, shOff: 4 };
   const RAD = { hip: 7, mid: 7, neck: 6, head: 10, sh: 6, el: 3.5, ha: 3.5, kn: 4.5, an: 3.5, to: 3 };
   const NUM = ['t1', 't2', 'hd', 'la1', 'la2', 'ra1', 'ra2', 'll1', 'll2', 'rl1', 'rl2', 'lf', 'rf', 'lift', 'dx'];
   const DEF = { v: 's', t1: 180, la1: -3, la2: -3, ra1: 3, ra2: 4, ll1: -2, ll2: -2, rl1: 2, rl2: 2, lift: 0, dx: 0 };
   const PTS = [['hip', 'hip'], ['mid', 'mid'], ['neck', 'neck'], ['head', 'head'], ['lsh', 'sh'], ['rsh', 'sh'],
     ['lel', 'el'], ['lha', 'ha'], ['rel', 'el'], ['rha', 'ha'], ['lkn', 'kn'], ['lan', 'an'], ['lto', 'to'], ['rkn', 'kn'], ['ran', 'an'], ['rto', 'to']];
   const ANCHOR = { hip: 'hip', ltoe: 'lto', rtoe: 'rto', lhand: 'lha', rhand: 'rha', lto: 'lto', rto: 'rto', lha: 'lha', rha: 'rha', head: 'head', lkn: 'lkn', rkn: 'rkn' };
+  /** Camera presets: th = yaw around the vertical axis, ph = downward pitch. */
+  const VIEWS = { side: { th: 0, ph: 0 }, front: { th: 90, ph: 0 }, q: { th: 38, ph: 13 }, back: { th: 180, ph: 0 } };
+  const ORBIT_DEG_PER_S = 36;
+
+  // segments drawn as individual strokes so they can be depth-sorted and highlighted
+  const SEGS = [['hips', 'lhp', 'rhp', 'hips'], ['shoulders', 'lsh', 'rsh', 'shoulders']];
+  for (const s of ['l', 'r']) {
+    SEGS.push([s + 'th', s + 'hp', s + 'kn', 'thigh'], [s + 'sn', s + 'kn', s + 'an', 'shin'], [s + 'ft', s + 'an', s + 'to', 'foot'],
+      [s + 'ua', s + 'sh', s + 'el', 'uarm'], [s + 'fa', s + 'el', s + 'ha', 'farm']);
+  }
 
   const D2R = Math.PI / 180;
-  const dir = (a) => [Math.sin(a * D2R), Math.cos(a * D2R)];
-  const mv = (p, len, a) => { const d = dir(a); return [p[0] + len * d[0], p[1] + len * d[1]]; };
-  const angOf = (from, to) => Math.atan2(to[0] - from[0], to[1] - from[1]) / D2R;
   const lerp = (a, b, u) => a + (b - a) * u;
   const ease = (u) => 0.5 - 0.5 * Math.cos(Math.PI * u);
+  const add3 = (p, len, d) => [p[0] + len * d[0], p[1] + len * d[1], p[2] + len * d[2]];
+  const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  function dir3(a, plane) {
+    const s = Math.sin(a * D2R), c = Math.cos(a * D2R);
+    return plane === 'f' ? [0, c, -s] : [s, c, 0];
+  }
 
   function normalize(p) {
     const q = Object.assign({}, DEF, p);
     if (q.t2 == null) q.t2 = q.t1;
     if (q.hd == null) q.hd = q.t2;
-    const front = q.v === 'f';
-    if (q.lf == null) q.lf = front ? q.ll2 - 80 : q.ll2 + 90;
-    if (q.rf == null) q.rf = front ? q.rl2 + 80 : q.rl2 + 90;
+    if (q.v === 'f') { if (q.lf == null) q.lf = 0; if (q.rf == null) q.rf = 0; }
+    else { if (q.lf == null) q.lf = q.ll2 + 90; if (q.rf == null) q.rf = q.rl2 + 90; }
     return q;
   }
 
   function build(q) {
-    const front = q.v === 'f', P = {};
-    P.hip = [0, 0];
-    P.mid = mv(P.hip, L.t1, q.t1);
-    P.neck = mv(P.mid, L.t2, q.t2);
-    P.head = mv(P.neck, L.neck + L.head, q.hd);
-    const sc = mv(P.neck, -L.shOff, q.t2);
-    if (front) {
-      P.lsh = mv(sc, L.sw, q.t2 + 90); P.rsh = mv(sc, L.sw, q.t2 - 90);
-      P.lhp = mv(P.hip, L.hw, q.t1 + 90); P.rhp = mv(P.hip, L.hw, q.t1 - 90);
-    } else {
-      P.lsh = sc; P.rsh = sc.slice(); P.lhp = [0, 0]; P.rhp = [0, 0];
-    }
+    const pl = q.v === 'f' ? 'f' : 's';
+    const D = (a) => dir3(a, pl);
+    const P = {};
+    P.hip = [0, 0, 0];
+    P.mid = add3(P.hip, L.t1, D(q.t1));
+    P.neck = add3(P.mid, L.t2, D(q.t2));
+    P.head = add3(P.neck, L.neck + L.head, D(q.hd));
+    const sc = add3(P.neck, -L.shOff, D(q.t2));
+    const latS = pl === 's' ? [0, 0, -1] : D(q.t2 + 90);
+    const latH = pl === 's' ? [0, 0, -1] : D(q.t1 + 90);
+    P.lsh = add3(sc, L.sw, latS); P.rsh = add3(sc, -L.sw, latS);
+    P.lhp = add3(P.hip, L.hw, latH); P.rhp = add3(P.hip, -L.hw, latH);
     for (const s of ['l', 'r']) {
-      P[s + 'el'] = mv(P[s + 'sh'], L.ua, q[s + 'a1']);
-      P[s + 'ha'] = mv(P[s + 'el'], L.fa, q[s + 'a2']);
-      P[s + 'kn'] = mv(P[s + 'hp'], L.th, q[s + 'l1']);
-      P[s + 'an'] = mv(P[s + 'kn'], L.sh, q[s + 'l2']);
-      P[s + 'to'] = mv(P[s + 'an'], front ? L.ftF : L.ft, q[s + 'f']);
+      P[s + 'el'] = add3(P[s + 'sh'], L.ua, D(q[s + 'a1']));
+      P[s + 'ha'] = add3(P[s + 'el'], L.fa, D(q[s + 'a2']));
+      P[s + 'kn'] = add3(P[s + 'hp'], L.th, D(q[s + 'l1']));
+      P[s + 'an'] = add3(P[s + 'kn'], L.sh, D(q[s + 'l2']));
+      if (pl === 's') P[s + 'to'] = add3(P[s + 'an'], L.ft, D(q[s + 'f']));
+      else {
+        const out = (s === 'l' ? 1 : -1) * latH[2];
+        P[s + 'to'] = add3(P[s + 'an'], L.ft * 0.85, norm3([0.93, 0.12, out * 0.35]));
+      }
     }
+    // eyes: on the face side of the head
+    const up = norm3(sub3(P.head, P.neck));
+    const fwd = pl === 's' ? D(q.hd - 90) : [1, 0, 0];
+    const lat = norm3(cross(up, fwd));
+    const eyeBase = add3(add3(P.head, 5, fwd), 1.6, up);
+    P.eyl = add3(eyeBase, 3.4, lat); P.eyr = add3(eyeBase, -3.4, lat);
     return P;
   }
 
@@ -63,17 +89,18 @@
     const dx = T[0] - S[0], dy = T[1] - S[1];
     let d = Math.hypot(dx, dy);
     const base = Math.atan2(dx, dy) / D2R;
+    const mv = (p, len, ang) => [p[0] + len * Math.sin(ang * D2R), p[1] + len * Math.cos(ang * D2R)];
     if (d >= a + b - 0.01) { const e = mv(S, a, base); return { e, h: mv(e, b, base), a1: base, a2: base }; }
     d = Math.max(d, Math.abs(a - b) + 0.01);
     const cosA = (a * a + d * d - b * b) / (2 * a * d);
     const A = Math.acos(Math.max(-1, Math.min(1, cosA))) / D2R;
     const a1 = base - bend * A;
     const e = mv(S, a, a1);
-    const a2 = angOf(e, T);
+    const a2 = Math.atan2(T[0] - e[0], T[1] - e[1]) / D2R;
     return { e, h: mv(e, b, a2), a1, a2 };
   }
 
-  /** Build skeleton, rest it on the floor (y = 0), solve planted hands. */
+  /** Build skeleton, rest it on the floor (Y = 0), plant IK hands. */
   function solve(q) {
     const P = build(q);
     const ik = q.ik || {};
@@ -84,18 +111,18 @@
       if (y > floor) floor = y;
     }
     const sy = -floor - (q.lift || 0), sx = q.dx || 0;
-    for (const k in P) P[k] = [P[k][0] + sx, P[k][1] + sy];
+    for (const k in P) P[k] = [P[k][0] + sx, P[k][1] + sy, P[k][2]];
     const out = Object.assign({}, q);
     for (const s of ['l', 'r']) {
       const o = ik[s]; if (!o) continue;
       const S = P[s + 'sh'];
-      const res = twoLink(S, [S[0] + (o.dx || 0), -RAD.ha], L.ua, L.fa, o.bend == null ? 1 : o.bend);
-      P[s + 'el'] = res.e; P[s + 'ha'] = res.h; out[s + 'a1'] = res.a1; out[s + 'a2'] = res.a2;
+      const res = twoLink([S[0], S[1]], [S[0] + (o.dx || 0), -RAD.ha], L.ua, L.fa, o.bend == null ? 1 : o.bend);
+      P[s + 'el'] = [res.e[0], res.e[1], S[2]]; P[s + 'ha'] = [res.h[0], res.h[1], S[2]];
+      out[s + 'a1'] = res.a1; out[s + 'a2'] = res.a2;
     }
     return { P, q: out };
   }
 
-  /** Prepare a keyframe: normalized + solved (arm angles resolved). */
   function prep(pose) {
     const q = normalize(pose);
     const r = solve(q);
@@ -118,14 +145,43 @@
     return q;
   }
 
-  function bbox(P) {
+  /** Project 3D points: cam {th, ph, flip, ox, oz}. Returns [screenX, screenY, depth]. */
+  function project(P, cam) {
+    const ct = Math.cos(cam.th * D2R), st = Math.sin(cam.th * D2R);
+    const cp = Math.cos(cam.ph * D2R), sp = Math.sin(cam.ph * D2R);
+    const f = cam.flip ? -1 : 1, out = {};
+    for (const k in P) {
+      const X = P[k][0] + (cam.ox || 0), Y = P[k][1], Z = P[k][2] + (cam.oz || 0);
+      const d = X * st + Z * ct;
+      out[k] = [f * (X * ct - Z * st), Y * cp + d * sp, d];
+    }
+    return out;
+  }
+  const projPt = (p, cam) => project({ p }, cam).p;
+
+  function bbox(Pp) {
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
     for (const [k, r] of PTS) {
-      const p = P[k], rr = r === 'head' ? RAD.head : RAD[r] + 2;
+      const p = Pp[k], rr = r === 'head' ? RAD.head : RAD[r] + 3;
       x0 = Math.min(x0, p[0] - rr); x1 = Math.max(x1, p[0] + rr);
       y0 = Math.min(y0, p[1] - rr); y1 = Math.max(y1, p[1] + rr);
     }
     return { x0, x1, y0, y1 };
+  }
+  const unionBB = (a, b) => (a ? { x0: Math.min(a.x0, b.x0), x1: Math.max(a.x1, b.x1), y0: Math.min(a.y0, b.y0), y1: Math.max(a.y1, b.y1) } : b);
+
+  function hull(pts) {
+    const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const crs = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = [], hi = [];
+    for (const q of p) { while (lo.length >= 2 && crs(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (hi.length >= 2 && crs(hi[hi.length - 2], hi[hi.length - 1], q) <= 0) hi.pop(); hi.push(q); }
+    return lo.slice(0, -1).concat(hi.slice(0, -1));
+  }
+  function boxPoly(x0, x1, y0, y1, z0, z1, cam) {
+    const c = [];
+    for (const x of [x0, x1]) for (const y of [y0, y1]) for (const z of [z0, z1]) { const p = projPt([x, y, z], cam); c.push([p[0], p[1]]); }
+    return hull(c).map((p) => r1(p[0]) + ',' + r1(p[1])).join(' ');
   }
 
   // ---------------------------------------------------------------------------
@@ -137,7 +193,6 @@
     return e;
   }
   const r1 = (n) => Math.round(n * 10) / 10;
-  const pt = (p) => r1(p[0]) + ' ' + r1(p[1]);
 
   const BOX_W = 250, BOX_H = 222, BOX_TOP = -212;
   const all = new Set();
@@ -152,49 +207,108 @@
 
   class Figure {
     constructor(container, o = {}) {
-      this.o = Object.assign({ flip: false, anchor: 'hip', idle: true, speed: 1, fit: 'fixed', prop: null, mat: false }, o);
+      this.o = Object.assign({ flip: false, anchor: 'hip', idle: true, speed: 1, fit: 'fixed', prop: null, mat: false, view: 'auto', hl: null, onPhase: null }, o);
       const svg = this.svg = el('svg', { class: 'fig-svg', viewBox: '-125 -212 250 222', preserveAspectRatio: 'xMidYMax meet', role: 'img', 'aria-label': o.label || 'Movement demonstration' });
-      this.mat = el('rect', { class: 'fig-mat', rx: 3, height: 5 }, svg);
+      this.floorE = el('ellipse', { class: 'fig-floor-e' }, svg);
       this.floor = el('line', { class: 'fig-floor' }, svg);
-      this.wall = el('rect', { class: 'fig-prop', rx: 2, width: 6 }, svg);
-      const g = el('g', { class: 'fig' }, svg);
-      this.parts = {
-        legF: el('path', { class: 'limb far' }, g), armF: el('path', { class: 'limb far' }, g),
-        torso: el('path', { class: 'torso' }, g),
-        head: el('circle', { class: 'head', r: L.head }, g), eye: el('circle', { class: 'eye', r: 1.9 }, g),
-        legN: el('path', { class: 'limb' }, g), armN: el('path', { class: 'limb' }, g)
-      };
-      this.g = g;
+      this.matEl = el('polygon', { class: 'fig-mat' }, svg);
+      this.wallEl = el('polygon', { class: 'fig-prop' }, svg);
+      this.shadow = el('ellipse', { class: 'fig-shadow' }, svg);
+      const g = this.g = el('g', { class: 'fig' }, svg);
+      this.items = {};
+      for (const [name, , , type] of SEGS) this.items[name] = { el: el('line', { class: 'seg s-' + type }, g), type };
+      this.items.torso = { el: el('path', { class: 'seg s-torso' }, g), type: 'torso' };
+      this.items.head = { el: el('circle', { class: 'head', r: L.head }, g), type: 'head' };
+      this.eyes = [el('circle', { class: 'eye', r: 1.8 }, g), el('circle', { class: 'eye', r: 1.8 }, g)];
+      this.order = '';
       container.appendChild(svg);
-      this.t = 0; this.playing = true; this.visible = true; this.mode = null;
-      this.cam = null;
+      this.t = 0; this.playing = true; this.visible = true; this.mode = null; this.cam = null; this.phase = -1;
       if ('IntersectionObserver' in window) {
         this.io = new IntersectionObserver((es) => { this.visible = es[es.length - 1].isIntersecting; });
         this.io.observe(svg);
       }
     }
 
-    // --- loop mode: repeating keyframes (exercise demos) ---------------------
+    // ---- camera -----------------------------------------------------------------
+    _angles(v) {
+      const view = this.o.view || 'auto';
+      const base = v === 'f' ? 90 : 0;
+      if (view === 'orbit') return { th: base + 38 + this.t * ORBIT_DEG_PER_S, ph: 13, orbit: true };
+      if (view === 'q') return { th: base + VIEWS.q.th, ph: VIEWS.q.ph };
+      if (view === 'auto') return { th: base, ph: 0 };
+      // explicit side/front: a front-authored pose seen "from the side" is base+90
+      const want = VIEWS[view] || VIEWS.side;
+      return { th: want.th, ph: want.ph };
+    }
+
+    setView(view) {
+      this.o.view = view;
+      if (this.mode === 'loop') this._fitLoop();
+      else if (this.mode === 'show' && this.cur) { this.from = null; this.cam = this._camFor(this._bboxShow(this.cur.K, this.cur.W, this.cur.flip)); this._applyCam(this.cam); }
+      this._tick(0);
+    }
+    setHighlight(hl) { this.o.hl = hl; this.order = ''; this._tick(0); }
+    setSpeed(s) { this.o.speed = s; }
+
+    _camFor(bb) {
+      if (this.o.fit === 'tight') {
+        const pad = 10;
+        let w = bb.x1 - bb.x0 + pad * 2, hgt = bb.y1 - bb.y0 + pad * 2;
+        const cx = (bb.x0 + bb.x1) / 2;
+        if (w / hgt < 1.25) w = hgt * 1.25; else hgt = w / 1.25;
+        const bottom = Math.max(8, bb.y1 + pad);
+        return { x: cx - w / 2, y: bottom - hgt, w, h: hgt };
+      }
+      const cx = (bb.x0 + bb.x1) / 2;
+      let w = BOX_W;
+      const need = bb.x1 - bb.x0 + 24;
+      if (need > w) w = need;
+      const top = Math.min(BOX_TOP * (w / BOX_W), bb.y0 - 10);
+      const bottom = Math.max(10, bb.y1 + 10);
+      const hgt = Math.max(w * BOX_H / BOX_W, bottom - top);
+      return { x: cx - w / 2, y: bottom - hgt, w, h: hgt };
+    }
+
+    _applyCam(c) {
+      this.svg.setAttribute('viewBox', `${r1(c.x)} ${r1(c.y)} ${r1(c.w)} ${r1(c.h)}`);
+      this.floor.setAttribute('x1', r1(c.x + 4)); this.floor.setAttribute('x2', r1(c.x + c.w - 4));
+      this.floor.setAttribute('y1', 1.5); this.floor.setAttribute('y2', 1.5);
+    }
+
+    // ---- loop mode: repeating keyframes (exercise demos) ---------------------
     loop(frames, o = {}) {
       Object.assign(this.o, o);
       this.mode = 'loop';
-      this.cur = null; this.from = null;
-      this.kf = frames.map((f) => ({ K: prep(f.pose), h: f.h || 0, t: f.t || 0 }));
+      this.cur = null; this.from = null; this.phase = -1; this.order = '';
+      this.kf = frames.map((f) => ({ K: prep(f.pose), h: f.h || 0, t: f.t || 0, label: f.label || null }));
       this.cycle = this.kf.reduce((a, k) => a + k.h + k.t, 0) || 1;
       this.t = 0;
-      // fixed camera over the whole cycle
+      this._fitLoop();
+      this._tick(0);
+      if (this.kf.length > 1 || this.o.idle || this.o.view === 'orbit') { all.add(this); ensureLoop(); }
+      return this;
+    }
+
+    _loopCam(q, tOverride) {
+      const a = this._angles(this.kf[0].K.v);
+      const { P } = solve(q);
+      const key = ANCHOR[this.o.anchor] || 'hip';
+      return { P, cam: { th: tOverride != null ? tOverride : a.th, ph: a.ph, flip: !!this.o.flip, ox: -P[key][0], oz: -P[key][2] } };
+    }
+
+    _fitLoop() {
       let bb = null;
-      const steps = 24;
-      for (let i = 0; i <= steps; i++) {
-        const P = this._points(this._sample((i / steps) * this.cycle), true);
-        const b = bbox(P);
-        bb = bb ? { x0: Math.min(bb.x0, b.x0), x1: Math.max(bb.x1, b.x1), y0: Math.min(bb.y0, b.y0), y1: Math.max(bb.y1, b.y1) } : b;
+      const a = this._angles(this.kf[0].K.v);
+      const yaws = a.orbit ? [0, 45, 90, 135, 180, 225, 270, 315] : [a.th];
+      for (let i = 0; i <= 16; i++) {
+        const q = this._sample((i / 16) * this.cycle);
+        for (const th of yaws) {
+          const { P, cam } = this._loopCam(q, th);
+          bb = unionBB(bb, bbox(project(P, cam)));
+        }
       }
       this.cam = this._camFor(bb);
       this._applyCam(this.cam);
-      this._render(this._points(this._sample(0)), this.kf[0].K.v);
-      if (this.kf.length > 1 || this.o.idle) { all.add(this); ensureLoop(); }
-      return this;
     }
 
     _sample(time) {
@@ -203,27 +317,16 @@
       let t = ((time % this.cycle) + this.cycle) % this.cycle;
       for (let i = 0; i < n; i++) {
         const k = kf[i];
-        if (t < k.h) return Object.assign({}, k.K.q, { ik: k.K.ik });
+        if (t < k.h) { this._phaseIdx = i; return Object.assign({}, k.K.q, { ik: k.K.ik }); }
         t -= k.h;
         if (t < k.t) {
-          const B = kf[(i + 1) % n].K;
-          return lerpK(k.K, B, ease(t / k.t));
+          this._phaseIdx = (i + 1) % n;
+          return lerpK(k.K, kf[(i + 1) % n].K, ease(t / k.t));
         }
         t -= k.t;
       }
+      this._phaseIdx = 0;
       return Object.assign({}, kf[0].K.q, { ik: kf[0].K.ik });
-    }
-
-    _points(q, noIdle) {
-      if (!noIdle && this.o.idle) this._idle(q);
-      const { P } = solve(q);
-      const key = ANCHOR[this.o.anchor] || 'hip';
-      const ax = P[key][0];
-      const flip = this.o.flip ? -1 : 1;
-      const out = {};
-      for (const k in P) out[k] = [flip * (P[k][0] - ax), P[k][1]];
-      out._v = q.v;
-      return out;
     }
 
     _idle(q) {
@@ -234,23 +337,24 @@
       if (!(q.ik && q.ik.r)) q.ra1 = (q.ra1 || 0) - s * 0.7;
     }
 
-    // --- show mode: hold a pose, smoothly transition between poses -------------
+    // ---- show mode: hold a pose, smoothly transition between poses -------------
     show(pose, o = {}) {
       const K = prep(pose);
       const flip = o.flip != null ? !!o.flip : !!this.o.flip;
       const anchorKey = ANCHOR[o.anchor || pose.anchor || 'hip'] || 'hip';
       const dur = o.dur != null ? o.dur : 1.1;
-      this.mode = 'show';
+      this.mode = 'show'; this.order = '';
       if (!this.cur || this.cur.K.v !== K.v || this.cur.flip !== flip || dur === 0) {
-        const W = -K.P[anchorKey][0];
+        const W = [-K.P[anchorKey][0], -K.P[anchorKey][2]];
+        const viewChanged = this.cur && this.cur.K.v !== K.v;
         this.from = null;
         this.cur = { K, W, flip };
         this.cam = this._camFor(this._bboxShow(K, W, flip));
         this._applyCam(this.cam);
-        if (this.cur.K.v !== K.v) this._fade();
+        if (viewChanged) this._fade();
       } else {
         const prev = this._curState();
-        const Wn = prev.W + prev.P[anchorKey][0] - K.P[anchorKey][0];
+        const Wn = [prev.W[0] + prev.P[anchorKey][0] - K.P[anchorKey][0], prev.W[1] + prev.P[anchorKey][2] - K.P[anchorKey][2]];
         this.from = { K: prev.K, W: prev.W, camFrom: this.cam, start: this.t, dur };
         this.cur = { K, W: Wn, flip };
         this.from.camTo = this._camFor(this._bboxShow(K, Wn, flip));
@@ -261,23 +365,24 @@
     }
 
     _curState() {
-      // effective pose currently displayed (mid-transition aware)
       if (this.from) {
         const u = Math.min(1, (this.t - this.from.start) / this.from.dur);
         if (u < 1) {
           const e = ease(u);
           const q = lerpK(this.from.K, this.cur.K, e);
-          const K = { q: solve(q).q, ik: q.ik, v: q.v, P: solve(q).P };
-          return { K, W: lerp(this.from.W, this.cur.W, e), P: K.P };
+          const s = solve(q);
+          return { K: { q: s.q, ik: q.ik, v: q.v, P: s.P }, W: [lerp(this.from.W[0], this.cur.W[0], e), lerp(this.from.W[1], this.cur.W[1], e)], P: s.P };
         }
       }
       return { K: this.cur.K, W: this.cur.W, P: this.cur.K.P };
     }
 
     _bboxShow(K, W, flip) {
-      const b = bbox(K.P), f = flip ? -1 : 1;
-      const xa = f * (b.x0 + W), xb = f * (b.x1 + W);
-      return { x0: Math.min(xa, xb), x1: Math.max(xa, xb), y0: b.y0, y1: b.y1 };
+      const a = this._angles(K.v);
+      const yaws = a.orbit ? [0, 45, 90, 135, 180, 225, 270, 315] : [a.th];
+      let bb = null;
+      for (const th of yaws) bb = unionBB(bb, bbox(project(K.P, { th, ph: a.ph, flip, ox: W[0], oz: W[1] })));
+      return bb;
     }
 
     _fade() {
@@ -285,41 +390,26 @@
       requestAnimationFrame(() => { this.g.style.transition = 'opacity .45s ease'; this.g.style.opacity = '1'; });
     }
 
-    _camFor(bb) {
-      if (this.o.fit === 'tight') {
-        const pad = 10;
-        let w = bb.x1 - bb.x0 + pad * 2, hgt = bb.y1 - bb.y0 + pad * 2;
-        const cx = (bb.x0 + bb.x1) / 2;
-        // keep a pleasant aspect (5:4) so thumbnails line up
-        if (w / hgt < 1.25) w = hgt * 1.25; else hgt = w / 1.25;
-        return { x: cx - w / 2, y: 8 - hgt, w, h: hgt };
-      }
-      const cx = (bb.x0 + bb.x1) / 2;
-      let w = BOX_W, hgt = BOX_H;
-      const need = bb.x1 - bb.x0 + 24;
-      if (need > w) { w = need; hgt = w * BOX_H / BOX_W; }
-      return { x: cx - w / 2, y: Math.min(BOX_TOP, bb.y0 - 10), w, h: Math.max(hgt, 10 - Math.min(BOX_TOP, bb.y0 - 10)) };
-    }
-
-    _applyCam(c) {
-      this.svg.setAttribute('viewBox', `${r1(c.x)} ${r1(c.y)} ${r1(c.w)} ${r1(c.h)}`);
-      const fx0 = c.x + 4, fx1 = c.x + c.w - 4;
-      this.floor.setAttribute('x1', r1(fx0)); this.floor.setAttribute('x2', r1(fx1));
-      this.floor.setAttribute('y1', 1.5); this.floor.setAttribute('y2', 1.5);
-    }
-
     _tick(dt) {
       if (this.playing) this.t += dt * (this.o.speed || 1);
       if (!this.visible && dt) return;
       if (this.mode === 'loop') {
-        this._render(this._points(this._sample(this.t)), null);
-      } else if (this.mode === 'show') {
-        let q, W, flip = this.cur.flip;
+        const q = this._sample(this.t);
+        if (this.o.idle) this._idle(q);
+        const { P, cam } = this._loopCam(q);
+        this._render(P, cam, this.kf[0].K.v);
+        if (this.o.onPhase && this._phaseIdx !== this.phase) {
+          this.phase = this._phaseIdx;
+          const k = this.kf[this.phase];
+          this.o.onPhase(this.phase, k && k.label);
+        }
+      } else if (this.mode === 'show' && this.cur) {
+        let q, W;
         if (this.from) {
           const u = Math.min(1, (this.t - this.from.start) / this.from.dur);
           const e = ease(u);
           q = lerpK(this.from.K, this.cur.K, e);
-          W = lerp(this.from.W, this.cur.W, e);
+          W = [lerp(this.from.W[0], this.cur.W[0], e), lerp(this.from.W[1], this.cur.W[1], e)];
           const a = this.from.camFrom, b = this.from.camTo;
           this.cam = { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e) };
           this._applyCam(this.cam);
@@ -330,65 +420,90 @@
         }
         if (this.o.idle) this._idle(q);
         const { P } = solve(q);
-        const f = flip ? -1 : 1, out = {};
-        for (const k in P) out[k] = [f * (P[k][0] + W), P[k][1]];
-        out._v = q.v;
-        this._render(out);
+        const a = this._angles(this.cur.K.v);
+        this._render(P, { th: a.th, ph: a.ph, flip: this.cur.flip, ox: W[0], oz: W[1] }, q.v);
       }
     }
 
-    _render(P) {
-      const front = P._v === 'f';
-      const p = this.parts;
-      const limbArm = (s) => `M${pt(P[s + 'sh'])}L${pt(P[s + 'el'])}L${pt(P[s + 'ha'])}`;
-      const limbLeg = (s) => `M${pt(P[s + 'hp'] || P.hip)}L${pt(P[s + 'kn'])}L${pt(P[s + 'an'])}L${pt(P[s + 'to'])}`;
-      // hips in front view
-      if (front) {
-        // recompute hip points from neighbours: they are not kept after transform, derive from knees' parents
+    _render(P, cam, v) {
+      const Pp = project(P, cam);
+      const it = this.items;
+      const hl = this.o.hl ? new Set(this.o.hl) : null;
+      // torso curve through the mid-spine
+      const ctrl = [2 * Pp.mid[0] - (Pp.hip[0] + Pp.neck[0]) / 2, 2 * Pp.mid[1] - (Pp.hip[1] + Pp.neck[1]) / 2];
+      it.torso.el.setAttribute('d', `M${r1(Pp.hip[0])} ${r1(Pp.hip[1])}Q${r1(ctrl[0])} ${r1(ctrl[1])} ${r1(Pp.neck[0])} ${r1(Pp.neck[1])}`);
+      const torsoDepth = (Pp.hip[2] + Pp.mid[2] + Pp.neck[2]) / 3;
+      it.torso.depth = torsoDepth;
+      for (const [name, a, b] of SEGS) {
+        const e = it[name].el;
+        e.setAttribute('x1', r1(Pp[a][0])); e.setAttribute('y1', r1(Pp[a][1]));
+        e.setAttribute('x2', r1(Pp[b][0])); e.setAttribute('y2', r1(Pp[b][1]));
+        it[name].depth = (Pp[a][2] + Pp[b][2]) / 2 - (name === 'hips' || name === 'shoulders' ? 0.2 : 0);
       }
-      const ctrl = [2 * P.mid[0] - (P.hip[0] + P.neck[0]) / 2, 2 * P.mid[1] - (P.hip[1] + P.neck[1]) / 2];
-      let torso = `M${pt(P.hip)}Q${pt(ctrl)} ${pt(P.neck)}`;
-      if (front) {
-        torso += `M${pt(P.lsh)}L${pt(P.rsh)}M${pt(P.lhp)}L${pt(P.rhp)}`;
+      it.head.el.setAttribute('cx', r1(Pp.head[0])); it.head.el.setAttribute('cy', r1(Pp.head[1]));
+      it.head.depth = Pp.head[2];
+      // classes: far side dimmed, worked muscles highlighted
+      for (const name in it) {
+        const x = it[name];
+        if (name === 'head') continue;
+        const far = x.depth < torsoDepth - 4;
+        const cls = 'seg s-' + x.type + (far ? ' far' : '') + (hl && hl.has(x.type) ? ' hl' : '');
+        if (x.cls !== cls) { x.el.setAttribute('class', cls); x.cls = cls; }
       }
-      p.torso.setAttribute('d', torso);
-      p.legF.setAttribute('d', limbLeg('l'));
-      p.armF.setAttribute('d', limbArm('l'));
-      p.legN.setAttribute('d', limbLeg('r'));
-      p.armN.setAttribute('d', limbArm('r'));
-      p.legF.setAttribute('class', front ? 'limb' : 'limb far');
-      p.armF.setAttribute('class', front ? 'limb' : 'limb far');
-      p.head.setAttribute('cx', r1(P.head[0])); p.head.setAttribute('cy', r1(P.head[1]));
-      if (front) {
-        p.eye.style.display = 'none';
-      } else {
-        // face direction: perpendicular to the head axis, toward the body's front
-        const hx = P.head[0] - P.neck[0], hy = P.head[1] - P.neck[1];
-        const len = Math.hypot(hx, hy) || 1;
-        const flip = (this.mode === 'show' ? this.cur.flip : this.o.flip) ? -1 : 1;
-        // rotate head axis by -90° (screen) then mirror if flipped
-        let fx = -hy / len, fy = hx / len;
-        if (flip < 0) { fx = hy / len; fy = -hx / len; }
-        p.eye.style.display = '';
-        p.eye.setAttribute('cx', r1(P.head[0] + fx * 4.6 + (hx / len) * 1.8));
-        p.eye.setAttribute('cy', r1(P.head[1] + fy * 4.6 + (hy / len) * 1.8));
+      // painter's algorithm: far → near
+      const names = Object.keys(it).sort((a, b) => it[a].depth - it[b].depth);
+      const key = names.join(',');
+      if (key !== this.order) {
+        this.order = key;
+        for (const n of names) {
+          this.g.appendChild(it[n].el);
+          if (n === 'head') { this.g.appendChild(this.eyes[0]); this.g.appendChild(this.eyes[1]); }
+        }
       }
-      if (this.o.prop === 'wall') {
-        this.wall.style.display = '';
-        const x = Math.min(P.hip[0], P.mid[0], P.neck[0]) - 15;
-        this.wall.setAttribute('x', r1(x)); this.wall.setAttribute('y', -175); this.wall.setAttribute('height', 175);
-      } else this.wall.style.display = 'none';
+      // eyes visible only on the camera-facing side of the head
+      [Pp.eyl, Pp.eyr].forEach((p, i) => {
+        const e = this.eyes[i];
+        if (p[2] > Pp.head[2] + 0.6) { e.style.display = ''; e.setAttribute('cx', r1(p[0])); e.setAttribute('cy', r1(p[1])); }
+        else e.style.display = 'none';
+      });
+      // floor, contact shadow, props
+      const lowX = [], lows = ['lto', 'rto', 'lan', 'ran', 'lkn', 'rkn', 'hip', 'lha', 'rha', 'head', 'mid'];
+      for (const k of lows) if (P[k][1] > -16) lowX.push(Pp[k][0]);
+      const flat = cam.ph < 1;
+      this.floor.style.display = flat ? '' : 'none';
+      this.floorE.style.display = flat ? 'none' : '';
+      const c3 = [(P.lto[0] + P.rto[0] + P.hip[0]) / 3, 0, (P.lto[2] + P.rto[2] + P.hip[2]) / 3];
+      const fc = projPt(c3, cam);
+      if (!flat) {
+        const R = this.o.fit === 'tight'
+          ? Math.max(30, (Math.max(...lowX, fc[0]) - Math.min(...lowX, fc[0])) / 2 + 22)
+          : Math.max(70, (this.cam ? this.cam.w : BOX_W) * 0.4);
+        this.floorE.setAttribute('cx', r1(fc[0])); this.floorE.setAttribute('cy', r1(fc[1]));
+        this.floorE.setAttribute('rx', r1(R)); this.floorE.setAttribute('ry', r1(R * Math.sin(cam.ph * D2R)));
+      }
+      if (lowX.length) {
+        const x0 = Math.min(...lowX), x1 = Math.max(...lowX);
+        const lift = Math.max(0, -Math.max(P.lto[1], P.rto[1], P.lha[1], P.rha[1], P.hip[1] + 4) - 3);
+        const rx = (x1 - x0) / 2 + 12;
+        this.shadow.style.display = '';
+        this.shadow.setAttribute('cx', r1((x0 + x1) / 2)); this.shadow.setAttribute('cy', r1(flat ? 2 : fc[1]));
+        this.shadow.setAttribute('rx', r1(rx * Math.max(0.5, 1 - lift / 60))); this.shadow.setAttribute('ry', r1(flat ? 3 : Math.max(3, rx * Math.sin(cam.ph * D2R) * 0.5)));
+        this.shadow.style.opacity = String(Math.max(0.25, 1 - lift / 40));
+      } else this.shadow.style.display = 'none';
       if (this.o.mat) {
-        this.mat.style.display = '';
-        const xs = [P.lto[0], P.rto[0], P.lha[0], P.rha[0], P.head[0], P.hip[0]];
-        const x0 = Math.min(...xs) - 16, x1 = Math.max(...xs) + 16;
-        this.mat.setAttribute('x', r1(x0)); this.mat.setAttribute('y', 0); this.mat.setAttribute('width', r1(x1 - x0));
-      } else this.mat.style.display = 'none';
+        const xs = ['lto', 'rto', 'lha', 'rha', 'head', 'hip'].map((k) => P[k][0]);
+        this.matEl.style.display = '';
+        this.matEl.setAttribute('points', boxPoly(Math.min(...xs) - 16, Math.max(...xs) + 16, 0, 4, -22, 22, cam));
+      } else this.matEl.style.display = 'none';
+      if (this.o.prop === 'wall') {
+        const x = Math.min(P.hip[0], P.mid[0], P.neck[0]) - 15;
+        this.wallEl.style.display = '';
+        this.wallEl.setAttribute('points', boxPoly(x - 6, x, -175, 0, -45, 45, cam));
+      } else this.wallEl.style.display = 'none';
     }
 
     pause() { this.playing = false; }
     play() { this.playing = true; }
-    setSpeed(s) { this.o.speed = s; }
     destroy() { all.delete(this); if (this.io) this.io.disconnect(); this.svg.remove(); }
 
     /** Draw a single static pose (thumbnails). */
@@ -397,16 +512,18 @@
       f.mode = 'loop';
       f.kf = [{ K: prep(pose), h: 1, t: 0 }];
       f.cycle = 1;
-      const P = f._points(f._sample(0), true);
-      f.cam = f._camFor(bbox(P));
-      f._applyCam(f.cam);
-      f._render(P);
+      f._fitLoop();
+      const q = f._sample(0);
+      const { P, cam } = f._loopCam(q);
+      f._render(P, cam, q.v);
       if (f.io) f.io.disconnect();
       return f;
     }
     static destroyAll() { for (const f of [...all]) f.destroy(); }
-    static debug(pose) { const K = prep(pose); return K.P; }
+    static debug(pose) { return prep(pose).P; }
   }
+  Figure.VIEWS = ['auto', 'side', 'front', 'q', 'orbit'];
+  Figure.VIEW_LABEL = { auto: 'Auto', side: 'Side', front: 'Front', q: '3/4', orbit: '360°' };
 
   window.Figure = Figure;
 })();

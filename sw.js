@@ -1,9 +1,9 @@
 /* Prana service worker — offline app shell.
  * Bump VERSION whenever files change: installed apps then show an "Update" prompt. */
-const VERSION = 'prana-v2';
+const VERSION = 'prana-v3';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/store.js', 'js/audio.js', 'js/ui.js', 'js/figure.js', 'js/poses.js', 'js/content.js', 'js/meditations.js', 'js/players.js', 'js/app.js',
+  'js/config.js', 'js/store.js', 'js/sync.js', 'js/audio.js', 'js/ui.js', 'js/figure.js', 'js/poses.js', 'js/content.js', 'js/meditations.js', 'js/players.js', 'js/app.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'
 ];
 
@@ -33,7 +33,8 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith((async () => {
     try {
-      const res = await Promise.race([fetch(req), timeout(4000)]);
+      // no-cache: always revalidate with the server (304 when unchanged) so code never goes stale
+      const res = await Promise.race([fetch(req, { cache: 'no-cache' }), timeout(4000)]);
       if (res && res.ok) {
         const copy = res.clone();
         caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
