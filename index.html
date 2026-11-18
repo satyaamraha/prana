@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#12a594">
+  <meta name="description" content="Prana — a daily practice companion for breathing exercises, breath challenges, workouts with demonstrations, yoga asanas and guided meditation.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Prana">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Prana — Breathe · Move · Meditate</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="icon-btn back-btn" id="backBtn" aria-label="Back" hidden></button>
+        <a class="brand" href="#/" aria-label="Prana home">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-name">Prana</span>
+        </a>
+      </div>
+      <div class="topbar-right">
+        <a class="icon-btn" href="#/progress" id="progressLink" aria-label="Progress"></a>
+        <a class="icon-btn" href="#/settings" id="settingsLink" aria-label="Settings"></a>
+      </div>
+    </header>
+
+    <main id="view" tabindex="-1"></main>
+
+    <nav class="tabbar" aria-label="Main">
+      <a href="#/" data-tab="today"><span class="ti" data-icon="home"></span><span>Today</span></a>
+      <a href="#/breathe" data-tab="breathe"><span class="ti" data-icon="wind"></span><span>Breathe</span></a>
+      <a href="#/move" data-tab="move"><span class="ti" data-icon="move"></span><span>Move</span></a>
+      <a href="#/yoga" data-tab="yoga"><span class="ti" data-icon="lotus"></span><span>Yoga</span></a>
+      <a href="#/mind" data-tab="mind"><span class="ti" data-icon="moon"></span><span>Mind</span></a>
+    </nav>
+  </div>
+
+  <div id="player" class="player" hidden aria-live="polite"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/store.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/figure.js"></script>
+  <script src="js/poses.js"></script>
+  <script src="js/content.js"></script>
+  <script src="js/meditations.js"></script>
+  <script src="js/players.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
