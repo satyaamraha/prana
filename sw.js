@@ -1,9 +1,9 @@
 /* Prana service worker — offline app shell.
  * Bump VERSION whenever files change: installed apps then show an "Update" prompt. */
-const VERSION = 'prana-v4';
+const VERSION = 'prana-v5';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/config.js', 'js/store.js', 'js/sync.js', 'js/audio.js', 'js/ui.js', 'js/figure.js', 'js/poses.js', 'js/content.js', 'js/meditations.js', 'js/players.js', 'js/app.js',
+  'js/config.js', 'js/store.js', 'js/sync.js', 'js/library.js', 'js/studio.js', 'js/audio.js', 'js/ui.js', 'js/figure.js', 'js/poses.js', 'js/content.js', 'js/meditations.js', 'js/players.js', 'js/app.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'
 ];
 
@@ -20,7 +20,7 @@ self.addEventListener('message', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== 'prana-audio').map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

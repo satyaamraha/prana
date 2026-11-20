@@ -608,20 +608,36 @@
   // ---------------------------------------------------------------------------
   // Mind
   // ---------------------------------------------------------------------------
+  const audioMin = (it) => Math.max(1, Math.round(it.duration / 60));
+  function audioCard(it) {
+    return sCard({
+      href: '#/audio/' + it.id, icon: 'headphones', title: it.title, sub: it.guide || Library.CATEGORIES[it.category] || '', done: isDoneToday({ id: it.id }),
+      meta: [{ t: audioMin(it) + ' min', icon: 'clock' }, { t: Library.CATEGORIES[it.category] || 'Recorded' }].concat(Library.isDownloaded(it.id) ? [{ t: 'Offline', icon: 'download', accent: true }] : [{ t: 'Recorded', accent: true }])
+    });
+  }
+  function studioCard() {
+    return `<a class="card account-card studio-card" href="#/studio"><div class="avatar">${ICON.mic}</div><div style="flex:1"><b>Meditation studio</b><span class="small muted" style="display:block">Record or upload guided meditations</span></div><span class="chev">${ICON.chev}</span></a>`;
+  }
+
   function mindList() {
     const meds = Meditations.list.map((m) => sCard({ href: '#/meditation/' + m.id, icon: m.icon, title: m.name, sub: m.tag, done: isDoneToday({ id: m.id }), meta: [{ t: m.minutes + ' min', icon: 'clock' }, { t: 'Guided', accent: true }] })).join('');
+    const recorded = Library.items.map(audioCard).join('');
     return {
       tab: 'mind', title: 'Mind', accent: 'var(--mind)',
       html: `
       <div class="page-head"><h1>Mind</h1><p>Guided meditations with voice, ambient sound and gentle bells.</p></div>
+      ${Library.isAdmin() ? studioCard() : ''}
       <div class="hero" style="--c1:#4776e6;--c2:#8a63f0">
         <h2>Silent meditation timer</h2><p>Sit in stillness. A bell marks the beginning and end.</p>
         <div style="margin-top:14px"><div class="small" style="opacity:.85;margin-bottom:6px;font-weight:650">Duration</div>${picker('timerMin', [3, 5, 10, 15, 20, 30], st.timerMin, (v) => v + 'm')}</div>
         <div style="margin-top:12px"><div class="small" style="opacity:.85;margin-bottom:6px;font-weight:650">Interval bell</div>${picker('timerBell', [0, 1, 5], st.timerBell, (v) => v ? 'Every ' + v + 'm' : 'None')}</div>
         <button class="btn" ${start({ kind: 'timer', minutes: st.timerMin, interval: st.timerBell })}>${ICON.play} Begin</button>
       </div>
+      ${recorded ? section('Recorded meditations') + recorded : ''}
       ${section('Guided meditations')}${meds}`,
-      after(root) { $$('.hero .picker button', root).forEach((b) => { b.style.borderColor = 'rgba(255,255,255,.3)'; if (!b.classList.contains('active')) { b.style.background = 'rgba(255,255,255,.12)'; b.style.color = '#fff'; } else { b.style.background = '#fff'; b.style.color = '#1b1930'; } }); }
+      after(root) {
+        Library.refresh();
+        $$('.hero .picker button', root).forEach((b) => { b.style.borderColor = 'rgba(255,255,255,.3)'; if (!b.classList.contains('active')) { b.style.background = 'rgba(255,255,255,.12)'; b.style.color = '#fff'; } else { b.style.background = '#fff'; b.style.color = '#1b1930'; } }); }
     };
   }
 
@@ -636,6 +652,62 @@
       ${listDots(['Find a quiet spot and silence notifications.', 'Headphones make the voice and ambient sound more immersive.', m.ambient === 'rain' ? 'This session uses a soft rain-like sound bed.' : 'This session uses a soft ambient drone.', 'Voice guidance can be toggled from the speaker icon during the session.'])}
       <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'meditation', id: m.id })}>${ICON.play} Begin · ${m.minutes} min</button></div>`
     };
+  }
+
+  function audioDetail(id) {
+    const it = Library.get(id);
+    const base = { tab: 'mind', accent: 'var(--mind)', back: '#/mind' };
+    if (!it) {
+      return Object.assign(base, {
+        title: 'Meditation', html: '<div class="page-head"><h1>Meditation</h1><p class="muted" data-audio-missing>Looking for this recording…</p></div>',
+        after(root) {
+          Library.refresh(true).then(() => {
+            if (Library.get(id)) { if (current && current.title === 'Meditation') render(true); return; }
+            const p = $('[data-audio-missing]', root); if (p) p.textContent = navigator.onLine ? 'This recording isn’t available any more.' : 'You’re offline and this recording isn’t saved on this device.';
+          });
+        }
+      });
+    }
+    const dl = Library.isDownloaded(it.id);
+    const sizeMB = it.size ? (it.size / 1048576).toFixed(it.size > 1048576 * 10 ? 0 : 1) + ' MB' : '';
+    return Object.assign(base, {
+      title: it.title,
+      html: `
+      <div class="detail-stage" style="display:grid;place-items:center;background:radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--mind) 25%, var(--surface-2)), var(--surface-2))"><div style="display:grid;place-items:center"><div class="orb-demo" style="width:min(40vw,190px);height:min(40vw,190px);border-radius:50%;background:radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--accent) 40%, #fff), var(--accent) 55%, transparent 75%);animation:breathe 10s ease-in-out infinite"></div></div></div>
+      <div class="detail-title"><div class="eyebrow">${audioMin(it)} min · ${esc(Library.CATEGORIES[it.category] || 'Recorded')}</div><h1>${esc(it.title)}</h1>${it.guide ? `<div class="sk">with ${esc(it.guide)}</div>` : ''}${it.description ? `<p style="white-space:pre-line">${esc(it.description)}</p>` : ''}</div>
+      <div class="card dl-card" data-dl-card>
+        <div style="flex:1;min-width:0"><b>${dl ? 'Available offline' : 'Listen offline'}</b><div class="small muted" data-dl-note>${dl ? 'Saved on this device' + (sizeMB ? ' · ' + sizeMB : '') : 'Download to play without a connection' + (sizeMB ? ' · ' + sizeMB : '')}</div><div class="st-progress" data-dl-prog hidden><i></i></div></div>
+        ${dl ? `<button class="btn btn-sm" data-dl-remove="${it.id}">${ICON.trash} Remove</button>` : `<button class="btn btn-sm btn-primary" data-dl="${it.id}">${ICON.download} Download</button>`}
+      </div>
+      ${section('Player')}
+      ${listDots(['Play / pause, skip ±15 s, and drag to any point.', 'Loop it, slow it down or speed it up, and set a stop timer for sleep.', 'Add a soft background drone or rain under the voice.', 'Keeps playing with the screen locked — use your lock-screen controls.'])}
+      ${Library.isAdmin() ? `<a class="btn btn-sm" href="#/studio" style="margin-top:16px">${ICON.edit} Manage in studio</a>` : ''}
+      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'audio', id: it.id })}>${ICON.play} Begin · ${audioMin(it)} min</button></div>`
+    });
+  }
+
+  function studio() {
+    const base = { tab: 'mind', title: 'Studio', accent: 'var(--mind)', back: '#/mind' };
+    const head = '<div class="page-head"><h1>Meditation studio</h1><p>Record or upload guided meditations. Published ones appear in everyone’s Mind tab.</p></div>';
+    if (!Library.enabled) return Object.assign(base, { html: head + '<div class="card"><p class="muted">Accounts aren’t set up for this copy of Prana.</p></div>' });
+    if (!Sync.user) {
+      return Object.assign(base, {
+        html: head + `<div class="card"><p class="muted" data-studio-msg>${Sync.ready ? 'Sign in with your admin account to use the studio.' : 'Checking your account…'}</p><a class="btn btn-sm btn-primary" href="#/account" style="margin-top:12px">Sign in</a></div>`,
+        after() { if (!Sync.ready) Sync.getClient().then(() => { if (current && current.title === 'Studio') render(true); }).catch(() => {}); }
+      });
+    }
+    if (!Library.isAdmin()) {
+      return Object.assign(base, {
+        html: head + '<div class="card"><p class="muted" data-studio-msg>Checking studio access…</p></div>',
+        after(root) {
+          Library.checkAdmin().then((ok) => {
+            if (ok) { if (current && current.title === 'Studio') render(true); return; }
+            const p = $('[data-studio-msg]', root); if (p) p.textContent = 'Only admins can open the studio. If this is your project, add your account as an admin by running supabase/meditations.sql in Supabase.';
+          });
+        }
+      });
+    }
+    return Object.assign(base, { html: head + '<div data-studio></div>', after(root) { Studio.mount($('[data-studio]', root)); } });
   }
 
   // ---------------------------------------------------------------------------
@@ -792,6 +864,7 @@
       html: `
       <div class="page-head"><h1>Settings</h1></div>
       ${accountCard()}
+      ${Library.isAdmin() ? studioCard() : ''}
       ${PWA.standalone() ? '' : `<div class="card" style="padding:4px 16px;margin-bottom:12px"><div class="field"><div><label>Install app</label><div class="hint">Home-screen app that works offline</div></div><button class="btn btn-sm btn-primary" data-install style="--accent:var(--breathe)">${ICON.download} Install</button></div></div>`}
       <div class="card" style="padding:4px 16px">
         <div class="field"><label for="setName">Name</label><input class="input" id="setName" value="${esc(Store.data.profile.name)}" style="max-width:180px"></div>
@@ -1009,7 +1082,7 @@
     [/^\/?$/, today], [/^\/breathe$/, breatheList], [/^\/breathe\/([\w-]+)$/, breathDetail], [/^\/challenge\/([\w-]+)$/, challengeDetail],
     [/^\/move$/, moveList], [/^\/workout\/([\w-]+)$/, workoutDetail], [/^\/exercise\/([\w-]+)$/, exerciseDetail],
     [/^\/yoga$/, yogaList], [/^\/flow\/([\w-]+)$/, flowDetail], [/^\/pose\/([\w-]+)$/, poseDetail],
-    [/^\/mind$/, mindList], [/^\/meditation\/([\w-]+)$/, medDetail],
+    [/^\/mind$/, mindList], [/^\/meditation\/([\w-]+)$/, medDetail], [/^\/audio\/([\w-]+)$/, audioDetail], [/^\/studio$/, studio],
     [/^\/programs$/, programsList], [/^\/program\/([\w-]+)$/, programDetail],
     [/^\/progress$/, progress], [/^\/settings$/, settings], [/^\/account$/, account]
   ];
@@ -1069,6 +1142,18 @@
       sb.textContent = speedLabel(st.speed);
       return;
     }
+    const dlb = e.target.closest('[data-dl]');
+    if (dlb) {
+      const it = Library.get(dlb.dataset.dl); if (!it) return;
+      dlb.disabled = true; dlb.textContent = 'Downloading…';
+      const prog = $('[data-dl-prog]', view); if (prog) prog.hidden = false;
+      Library.download(it, (p) => { const i = prog && $('i', prog); if (i) i.style.width = (p * 100).toFixed(1) + '%'; const n = $('[data-dl-note]', view); if (n) n.textContent = `Downloading… ${Math.round(p * 100)}%`; })
+        .then(() => { toast('Saved for offline listening'); render(true); })
+        .catch((err) => { toast(navigator.onLine ? err.message : 'You’re offline — connect to download'); render(true); });
+      return;
+    }
+    const dlr = e.target.closest('[data-dl-remove]');
+    if (dlr) { const it = Library.get(dlr.dataset.dlRemove); if (it) Library.removeDownload(it).then(() => { toast('Removed from this device'); render(true); }); return; }
     const rw = e.target.closest('[data-reset-wk]');
     if (rw) { delete PF().wk[rw.dataset.resetWk]; Store.save(); render(true); return; }
     const seg = e.target.closest('[data-seg] button');
@@ -1118,6 +1203,13 @@
     if (evt && evt.type === 'link-error') { location.hash = '#/account?error=' + encodeURIComponent(evt.message); }
   });
   Sync.boot();
+  Library.on((what) => {
+    if (Play.active) return;
+    const h = location.hash;
+    if (what === 'list' && /^#\/(mind|audio\/)/.test(h)) render(true);
+    if (what === 'admin' && /^#\/(mind|settings|studio|audio\/)/.test(h)) render(true);
+  });
+  Library.refresh();
 
   // ---------------------------------------------------------------------------
   // Service worker: offline support + "update available" prompt

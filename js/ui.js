@@ -39,6 +39,13 @@
     download: P(path('M12 4v11') + path('M7 10l5 5 5-5') + path('M4 20h16')),
     upload: P(path('M12 20V9') + path('M7 14l5-5 5 5') + path('M4 4h16')),
     lock: P('<rect x="5" y="11" width="14" height="10" rx="2"/>' + path('M8 11V8a4 4 0 0 1 8 0v3')),
+    mic: P('<rect x="9" y="3" width="6" height="11" rx="3"/>' + path('M5 11a7 7 0 0 0 14 0') + path('M12 18v3')),
+    stop: P('<rect x="6" y="6" width="12" height="12" rx="2.2"/>', true),
+    trash: P(path('M4 7h16') + path('M10 11v6') + path('M14 11v6') + path('M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13') + path('M9 7V4h6v3')),
+    edit: P(path('M4 20h4L19 9l-4-4L4 16z') + path('M14 6l4 4')),
+    headphones: P(path('M4 15v-3a8 8 0 0 1 16 0v3') + '<rect x="3" y="14" width="4.5" height="6.5" rx="1.6"/><rect x="16.5" y="14" width="4.5" height="6.5" rx="1.6"/>'),
+    back15: P(path('M4.6 9A8 8 0 1 1 4 12') + path('M4 4.5V9h4.5') + '<text x="12.6" y="15.6" font-size="7.4" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif">15</text>'),
+    fwd15: P(path('M19.4 9A8 8 0 1 0 20 12') + path('M20 4.5V9h-4.5') + '<text x="11.4" y="15.6" font-size="7.4" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none" font-family="system-ui,sans-serif">15</text>'),
     repeat: P(path('M17 2l3 3-3 3') + path('M4 11V9a4 4 0 0 1 4-4h12') + path('M7 22l-3-3 3-3') + path('M20 13v2a4 4 0 0 1-4 4H4'))
   };
 

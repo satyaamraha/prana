@@ -557,6 +557,233 @@
   }
 
   // ===========================================================================
+  // Recorded meditations (audio files from the library)
+  // ===========================================================================
+  const SLEEP_OPTS = [0, 10, 20, 30, 45, 60];
+  const RATES = [0.75, 0.9, 1, 1.1, 1.25];
+  const AMB = ['off', 'drone', 'rain'];
+  const AMB_LABEL = { off: 'Off', drone: 'Drone', rain: 'Rain' };
+  const POS_KEY = 'prana.audioPos';
+  const rateLabel = (r) => (r === 1 ? '1×' : String(r).replace(/^0/, '') + '×');
+  /** iOS ignores <audio>.volume (hardware buttons only) — detect it and say so. */
+  const volumeWorks = (() => { try { const a = document.createElement('audio'); a.volume = 0.5; return a.volume === 0.5; } catch (e) { return false; } })();
+  function audioPrefs() {
+    const s = Store.data.settings;
+    s.audio = Object.assign({ vol: 1, amb: 'off', ambVol: 0.5, rate: 1, loop: false, sleep: 0 }, s.audio || {});
+    return s.audio;
+  }
+  const readPos = () => { try { return JSON.parse(localStorage.getItem(POS_KEY)) || {}; } catch (e) { return {}; } };
+  function savePos(id, sec) {
+    const all = readPos();
+    if (sec == null) delete all[id]; else all[id] = Math.round(sec);
+    try { localStorage.setItem(POS_KEY, JSON.stringify(all)); } catch (e) { /* ignore */ }
+  }
+
+  class AudioSession extends Session {
+    constructor(o) { super(o); this.item = o.item; this.listenedSec = 0; this.playStart = 0; this.sleepEnd = 0; this.lastPosSave = 0; }
+    start() {
+      this.open();
+      Sound.releaseAwake();                 // let the screen lock — audio keeps playing
+      const vb = $('[data-act="voice"]', this.root);
+      if (vb) vb.style.visibility = 'hidden';
+      const it = this.item, p = this.prefs = audioPrefs();
+      this.duration = it.duration || 0;
+      this.bar.innerHTML = '<div class="pl-progress"><i></i></div>';
+      const seg = (name, opts, cur, label) => `<div class="au-seg" role="group">${opts.map((v) => `<button type="button" data-act="${name}:${v}" class="${String(v) === String(cur) ? 'active' : ''}" aria-pressed="${String(v) === String(cur)}">${label(v)}</button>`).join('')}</div>`;
+      this.body.classList.add('au-body');
+      this.body.innerHTML = `
+        <div class="au-art"><div class="med-orb paused"></div></div>
+        <div class="au-head"><div class="au-title">${esc(it.title)}</div><div class="au-sub">${esc([it.guide, Library.CATEGORIES[it.category]].filter(Boolean).join(' · '))}</div></div>
+        <div class="au-status" role="status" aria-live="polite"></div>
+        <div class="au-seek">
+          <input type="range" class="au-range" min="0" max="${Math.max(1, this.duration)}" step="1" value="0" aria-label="Position">
+          <div class="au-times"><span class="au-cur">0:00</span><span class="au-left">-${fmt(this.duration)}</span></div>
+        </div>
+        <div class="au-transport">
+          <button class="au-btn" data-act="loop" aria-label="Loop" aria-pressed="${p.loop}">${ICON.repeat}</button>
+          <button class="pl-btn" data-act="back15" aria-label="Back 15 seconds">${ICON.back15}</button>
+          <button class="pl-btn main" data-act="pause" aria-label="Play">${ICON.play}</button>
+          <button class="pl-btn" data-act="fwd15" aria-label="Forward 15 seconds">${ICON.fwd15}</button>
+          <button class="au-btn au-rate" data-act="rate" aria-label="Playback speed">${rateLabel(p.rate)}</button>
+        </div>
+        <div class="au-panel">
+          <div class="au-row">
+            <button class="au-ic" data-act="mute" aria-label="Mute">${ICON.volume}</button>
+            ${volumeWorks ? `<input type="range" class="au-vol" min="0" max="1" step="0.01" value="${p.vol}" aria-label="Volume">` : '<span class="au-note">Use your device’s volume buttons</span>'}
+          </div>
+          <div class="au-row"><span class="au-lbl">Background</span>${seg('amb', AMB, p.amb, (v) => AMB_LABEL[v])}</div>
+          <div class="au-row au-ambrow" ${p.amb === 'off' ? 'hidden' : ''}><span class="au-lbl">Bg volume</span><input type="range" class="au-ambvol" min="0" max="1" step="0.01" value="${p.ambVol}" aria-label="Background volume"></div>
+          <div class="au-row"><span class="au-lbl">Stop after</span>${seg('sleep', SLEEP_OPTS, p.sleep, (v) => (v ? v + 'm' : 'End'))}</div>
+        </div>`;
+      this.controls.innerHTML = '';
+      const q = (s) => $(s, this.body);
+      this.el = { orb: q('.med-orb'), status: q('.au-status'), range: q('.au-range'), cur: q('.au-cur'), left: q('.au-left'), play: q('[data-act="pause"]'), loop: q('[data-act="loop"]'), rate: q('[data-act="rate"]'), mute: q('[data-act="mute"]'), vol: q('.au-vol'), ambRow: q('.au-ambrow'), ambVol: q('.au-ambvol'), prog: $('.pl-progress i', this.bar) };
+
+      const a = this.audio = document.createElement('audio');
+      a.preload = 'auto'; a.loop = !!p.loop; a.playbackRate = p.rate;
+      if ('preservesPitch' in a) a.preservesPitch = true;
+      if (volumeWorks) a.volume = p.vol;
+      a.addEventListener('play', () => this.onPlayState(true));
+      a.addEventListener('pause', () => this.onPlayState(false));
+      a.addEventListener('playing', () => this.status(''));
+      a.addEventListener('waiting', () => { if (!a.paused) this.status('Loading…'); });
+      a.addEventListener('timeupdate', () => this.render());
+      a.addEventListener('loadedmetadata', () => {
+        if (isFinite(a.duration) && a.duration > 0) { this.duration = a.duration; this.el.range.max = String(Math.round(a.duration)); }
+        if (this.resumeAt) { a.currentTime = this.resumeAt; this.resumeAt = 0; }
+        this.render();
+      });
+      a.addEventListener('ended', () => { if (!a.loop) { savePos(it.id, null); this.status('Complete'); setTimeout(() => this.finish(true), 1200); } });
+      a.addEventListener('error', () => {
+        this.status(navigator.onLine ? 'Couldn’t play this recording. Try again in a moment.' : 'You’re offline. Download this meditation to listen without a connection.', true);
+      });
+
+      // seek / volume sliders
+      this.el.range.addEventListener('input', () => { this.scrubbing = true; this.el.cur.textContent = fmt(+this.el.range.value); });
+      this.el.range.addEventListener('change', () => { this.scrubbing = false; this.seek(+this.el.range.value); });
+      if (this.el.vol) {
+        this.el.vol.addEventListener('input', () => { a.volume = +this.el.vol.value; if (a.muted && a.volume > 0) this.setMute(false); });
+        this.el.vol.addEventListener('change', () => { p.vol = +this.el.vol.value; Store.save(); });
+      }
+      this.el.ambVol.addEventListener('input', () => Sound.ambientVolume(+this.el.ambVol.value));
+      this.el.ambVol.addEventListener('change', () => { p.ambVol = +this.el.ambVol.value; Store.save(); });
+
+      // resume where you left off
+      const saved = readPos()[it.id];
+      if (saved > 20 && (!this.duration || saved < this.duration - 20)) {
+        this.resumeAt = saved;
+        this.status(`Resuming at ${fmt(saved)} · <button class="link-btn" data-act="restart">Start over</button>`);
+      }
+      if (p.sleep) this.sleepEnd = performance.now() + p.sleep * 60e3;
+      this.mediaSession(true);
+
+      // stream right away (keeps the tap's permission to play); offline copies load first
+      if (Library.isDownloaded(it.id) || it.localUrl) {
+        Library.playableUrl(it).then((url) => { if (this.finished) return; this.url = url; a.src = url; this.play(); });
+      } else { this.url = Library.audioUrl(it); a.src = this.url; this.play(); }
+      this.status(this.el.status.innerHTML || 'Loading…');
+    }
+
+    play() {
+      const pr = this.audio.play();
+      if (pr && pr.catch) pr.catch((e) => { if (e && e.name === 'NotAllowedError') this.status('Tap play to begin'); });
+    }
+    status(html, isErr) { this.el.status.innerHTML = html; this.el.status.classList.toggle('err', !!isErr); }
+    listened() { return this.listenedSec + (this.playStart ? (performance.now() - this.playStart) / 1000 : 0); }
+    onPlayState(playing) {
+      if (this.finished) return;
+      if (playing && !this.playStart) this.playStart = performance.now();
+      if (!playing && this.playStart) { this.listenedSec += (performance.now() - this.playStart) / 1000; this.playStart = 0; }
+      this.paused = !playing;
+      this.el.play.innerHTML = playing ? ICON.pause : ICON.play;
+      this.el.play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+      this.el.orb.classList.toggle('paused', !playing);
+      if (playing && this.prefs.amb !== 'off') Sound.ambientStart(this.prefs.amb, { force: true, volume: this.prefs.ambVol, fadeIn: 2.5 });
+      else if (!playing) Sound.ambientStop();
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+      if (!playing) savePos(this.item.id, this.audio.currentTime);
+    }
+    togglePause() { if (this.audio.paused) { if (/Tap play/.test(this.el.status.textContent)) this.status(''); this.play(); } else this.audio.pause(); }
+    seek(t) {
+      const a = this.audio, max = this.duration || a.duration || 0;
+      a.currentTime = Math.max(0, Math.min(max ? max - 0.25 : t, t));
+      this.render();
+    }
+    setMute(m) {
+      this.audio.muted = m;
+      this.el.mute.innerHTML = m ? ICON.mute : ICON.volume;
+      this.el.mute.setAttribute('aria-label', m ? 'Unmute' : 'Mute');
+    }
+    _loop() {                                   // driven by the audio clock, not the session timer
+      if (this.finished) return;
+      this.active = this.listened();
+      if (this.sleepEnd && performance.now() >= this.sleepEnd && !this.fading) this.sleepFade();
+    }
+    sleepFade() {
+      this.fading = true;
+      const a = this.audio, start = volumeWorks ? a.volume : 1;
+      Sound.ambientStop();
+      let k = 0;
+      const iv = setInterval(() => {
+        k++;
+        if (volumeWorks) a.volume = Math.max(0, start * (1 - k / 30));
+        if (k >= 30 || this.finished) {
+          clearInterval(iv); a.pause();
+          if (volumeWorks) a.volume = start;
+          if (!this.finished) this.finish(this.listened() >= Math.min(this.duration * 0.9, this.duration - 30));
+        }
+      }, 200);
+      this.status('Sleep timer — fading out');
+    }
+    render() {
+      const a = this.audio; if (!a) return;
+      const t = a.currentTime || 0, d = this.duration || a.duration || 0;
+      if (!this.scrubbing) { this.el.range.value = String(Math.round(t)); this.el.cur.textContent = fmt(t); }
+      this.el.left.textContent = '-' + fmt(Math.max(0, d - t));
+      this.el.prog.style.width = d ? (100 * Math.min(1, t / d)).toFixed(2) + '%' : '0%';
+      this.el.range.style.setProperty('--pct', d ? (100 * t / d).toFixed(2) + '%' : '0%');
+      if (performance.now() - this.lastPosSave > 5000 && t > 5) { this.lastPosSave = performance.now(); savePos(this.item.id, t); }
+      if ('mediaSession' in navigator && navigator.mediaSession.setPositionState && d && isFinite(d)) {
+        try { navigator.mediaSession.setPositionState({ duration: d, playbackRate: a.playbackRate, position: Math.min(t, d) }); } catch (e) { /* ignore */ }
+      }
+    }
+    onAction(act) {
+      const a = this.audio, p = this.prefs;
+      if (act === 'back15' || act === 'prev') this.seek(a.currentTime - 15);
+      else if (act === 'fwd15' || act === 'next') this.seek(a.currentTime + 15);
+      else if (act === 'restart') { this.resumeAt = 0; this.seek(0); savePos(this.item.id, null); this.status(''); }
+      else if (act === 'loop') {
+        p.loop = !p.loop; a.loop = p.loop; Store.save();
+        this.el.loop.setAttribute('aria-pressed', String(p.loop));
+        UI.toast(p.loop ? 'Loop on — plays again from the start' : 'Loop off');
+      } else if (act === 'rate') {
+        p.rate = RATES[(RATES.indexOf(p.rate) + 1) % RATES.length] || 1; a.playbackRate = p.rate; Store.save();
+        this.el.rate.textContent = rateLabel(p.rate);
+      } else if (act === 'mute') this.setMute(!a.muted);
+      else if (act.startsWith('amb:')) {
+        p.amb = act.slice(4); Store.save();
+        this.markSeg('amb', p.amb);
+        this.el.ambRow.hidden = p.amb === 'off';
+        if (p.amb === 'off') Sound.ambientStop(); else if (!a.paused) Sound.ambientStart(p.amb, { force: true, volume: p.ambVol, fadeIn: 1.5 });
+      } else if (act.startsWith('sleep:')) {
+        p.sleep = +act.slice(6); Store.save();
+        this.markSeg('sleep', p.sleep);
+        this.sleepEnd = p.sleep ? performance.now() + p.sleep * 60e3 : 0;
+        UI.toast(p.sleep ? `Stops in ${p.sleep} minutes` : (p.loop ? 'Plays until you stop it' : 'Stops at the end'));
+      }
+    }
+    markSeg(name, v) {
+      $$(`[data-act^="${name}:"]`, this.body).forEach((b) => { const on = b.dataset.act === `${name}:${v}`; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
+    }
+    mediaSession(on) {
+      if (!('mediaSession' in navigator)) return;
+      const ms = navigator.mediaSession;
+      const set = (k, fn) => { try { ms.setActionHandler(k, on ? fn : null); } catch (e) { /* unsupported action */ } };
+      if (on && window.MediaMetadata) {
+        const base = location.href.split('#')[0].replace(/[^/]*$/, '');
+        ms.metadata = new MediaMetadata({ title: this.item.title, artist: this.item.guide || 'Prana', album: 'Prana · Meditations', artwork: [{ src: base + 'icons/icon-192.png', sizes: '192x192', type: 'image/png' }, { src: base + 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }] });
+      } else if (!on) ms.metadata = null;
+      set('play', () => this.play());
+      set('pause', () => this.audio.pause());
+      set('seekbackward', () => this.seek(this.audio.currentTime - 15));
+      set('seekforward', () => this.seek(this.audio.currentTime + 15));
+      set('seekto', (d) => this.seek(d.seekTime));
+      set('stop', () => this.audio.pause());
+    }
+    cleanup() {
+      if (!this.audio) return;
+      const a = this.audio;
+      if (!this.finished || a.currentTime < (this.duration || 0) - 5) { if (a.currentTime > 20 && !a.ended) savePos(this.item.id, a.currentTime); }
+      a.pause(); a.removeAttribute('src'); a.load();
+      if (this.url && this.url.startsWith('blob:') && !this.item.localUrl) URL.revokeObjectURL(this.url);
+      this.mediaSession(false);
+      this.audio = null;
+    }
+    // keep the last frame visible after the audio element is gone
+    renderSummary(completed, logged, pbs) { this.body.classList.remove('au-body'); super.renderSummary(completed, logged, pbs); }
+  }
+
+  // ===========================================================================
   // Launcher
   // ===========================================================================
   /** Remembered rest / timing choices (Settings → prefs). */
@@ -576,6 +803,11 @@
       case 'flow': { const f = Content.flow(desc.id); const p = prefs(); const min = Math.round(Content.flowSeconds(f, { rounds: desc.rounds, pace: p.suryaPace, roundRest: p.suryaRest, pause: p.flowPause }) / 60); return { title: f.name + (desc.rounds ? ` · ${desc.rounds} rounds` : ''), sub: `${min} min · ${f.tag}`, cat: 'yoga', icon: f.icon || 'lotus', href: '#/flow/' + f.id, min }; }
       case 'pose': { const y = Content.yoga(desc.id); return { title: y.name, sub: y.sk, cat: 'yoga', icon: 'lotus', href: '#/pose/' + y.id, min: 1 }; }
       case 'meditation': { const m = Meditations.get(desc.id); return { title: m.name, sub: `${m.minutes} min · ${m.tag}`, cat: 'mind', icon: m.icon || 'moon', href: '#/meditation/' + m.id, min: m.minutes }; }
+      case 'audio': {
+        const it = desc.item || (window.Library && Library.get(desc.id));
+        const min = it ? Math.max(1, Math.round(it.duration / 60)) : 10;
+        return { title: it ? it.title : 'Recorded meditation', sub: it ? `${min} min · ${it.guide || 'Recorded'}` : 'Recorded meditation', cat: 'mind', icon: 'headphones', href: '#/audio/' + desc.id, min };
+      }
       case 'timer': return { title: `Silent Meditation`, sub: `${desc.minutes} min · bells mark the time`, cat: 'mind', icon: 'clock', href: '#/mind', min: desc.minutes };
     }
     return { title: '?', sub: '', cat: 'breathe', icon: 'wind' };
@@ -638,6 +870,12 @@
       case 'meditation': {
         const m = Meditations.get(desc.id);
         s = new MeditationSession({ title: o.title || m.name, cat: 'mind', kind: 'meditation', ref: m.id, script: m.script, duration: m.duration, ambient: m.ambient, onDone });
+        break;
+      }
+      case 'audio': {
+        const it = desc.item || (window.Library && Library.get(desc.id));
+        if (!it) { UI.toast('That recording isn’t available right now'); return; }
+        s = new AudioSession({ title: o.title || it.title, cat: 'mind', kind: 'audio', ref: it.id, item: it, onDone });
         break;
       }
       case 'timer': {

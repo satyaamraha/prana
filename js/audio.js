@@ -90,12 +90,14 @@
 
   // Ambient bed: brown noise + slow drone ---------------------------------
   let amb = null;
-  function ambientStart(kind = 'drone') {
-    const c = ac(); if (!c || !soundOn() || !Store.data.settings.ambient) return;
+  const AMB_LEVEL = 0.22;
+  /** o.force: play even if ambient sound is off in Settings (the user chose it in the player). o.volume: 0–1. */
+  function ambientStart(kind = 'drone', o = {}) {
+    const c = ac(); if (!c || (!o.force && (!soundOn() || !Store.data.settings.ambient))) return;
     ambientStop(true);
     const out = c.createGain();
     out.gain.setValueAtTime(0.0001, c.currentTime);
-    out.gain.exponentialRampToValueAtTime(0.22, c.currentTime + 4);
+    out.gain.exponentialRampToValueAtTime(Math.max(0.0001, AMB_LEVEL * (o.volume == null ? 1 : o.volume)), c.currentTime + (o.fadeIn || 4));
     out.connect(master);
     const nodes = [];
     const len = c.sampleRate * 4, buf = c.createBuffer(1, len, c.sampleRate), ch = buf.getChannelData(0);
@@ -127,6 +129,12 @@
     setTimeout(() => { nodes.forEach((n) => { try { n.stop(); } catch (e) { /* already stopped */ } }); out.disconnect(); }, fade * 1000 + 100);
   }
   const ambientOn = () => !!amb;
+  function ambientVolume(v) {
+    if (!amb || !ctx) return;
+    const t = ctx.currentTime;
+    amb.out.gain.cancelScheduledValues(t);
+    amb.out.gain.setTargetAtTime(Math.max(0.0001, AMB_LEVEL * v), t, 0.08);
+  }
 
   // Speech ---------------------------------------------------------------
   const hasTTS = 'speechSynthesis' in window;
@@ -163,7 +171,7 @@
 
   window.Sound = {
     unlock: ac, tone, bell, breath, tick, beep, go, ding, success,
-    ambientStart, ambientStop, ambientOn,
+    ambientStart, ambientStop, ambientOn, ambientVolume,
     speak, hush, get voices() { return voices; }, hasTTS,
     vibrate, keepAwake, releaseAwake
   };
