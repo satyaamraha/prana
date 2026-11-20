@@ -352,6 +352,7 @@
         </div>
         <div class="week-strip">${week}</div>
       </div>
+      ${todayHabits()}
       ${installCard()}
       ${Sync.enabled && !Sync.user && !S().hideSyncNudge && Store.data.log.length > 0 ? `<div class="card install-card" style="margin-top:12px">
         <div class="row" style="align-items:flex-start;gap:14px">
@@ -365,7 +366,8 @@
       ${section('Your programs', '<a href="#/programs">Browse all</a>')}
       ${progHtml}
       ${section('Quick start')}
-      <div class="quick">${quick}</div>`
+      <div class="quick">${quick}</div>`,
+      after() { celebrate(); }
     };
   }
 
@@ -709,6 +711,377 @@
     }
     return Object.assign(base, { html: head + '<div data-studio></div>', after(root) { Studio.mount($('[data-studio]', root)); } });
   }
+
+  // ---------------------------------------------------------------------------
+  // Habits — lifestyle counters, insights and rewards
+  // ---------------------------------------------------------------------------
+  const DAYMS = 864e5;
+  const pad2 = (n) => String(n).padStart(2, '0');
+  function since(ms, long) {
+    const d = Math.floor(ms / DAYMS), h = Math.floor((ms % DAYMS) / 36e5), m = Math.floor((ms % 36e5) / 6e4), s = Math.floor((ms % 6e4) / 1e3);
+    if (long) return `${d}<small>d</small> ${pad2(h)}<small>h</small> ${pad2(m)}<small>m</small> ${pad2(s)}<small>s</small>`;
+    return `${h}h ${pad2(m)}m ${pad2(s)}s`;
+  }
+  const hIcon = (c) => ICON[c.icon] || ICON.sparkle;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const toLocalInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
+  const fmtWhen = (ms) => new Date(ms).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+
+  function milestoneProgress(s) {
+    const nm = Habits.nextMilestone(s.currentDays);
+    const prev = [0].concat(Habits.MILESTONES).filter((m) => m <= s.currentDays).pop();
+    return { next: nm, pct: nm ? Math.min(1, (s.currentMs / DAYMS - prev) / (nm - prev)) : 1 };
+  }
+
+  function levelCard(x) {
+    return `<a class="hero lvl-card" href="#/rewards" style="--c1:#e0457b;--c2:#8a63f0">
+      <div class="lvl-top"><div class="lvl-badge"><small>LEVEL</small><b>${x.level}</b></div>
+        <div style="flex:1;min-width:0"><div class="lvl-title">${esc(x.title)}</div><div class="small" style="opacity:.88">${x.total.toLocaleString()} XP · ${(x.need - x.into).toLocaleString()} XP to level ${x.level + 1}</div></div>
+        <span class="chev" style="color:#fff">${ICON.chev}</span></div>
+      <div class="lvl-bar"><i style="width:${(x.pct * 100).toFixed(1)}%"></i></div>
+    </a>`;
+  }
+  function checkinCard() {
+    if (Habits.checkedInToday()) {
+      const n = Habits.checkinStreak(), mood = Habits.MOODS.find((m) => +m[0] === Habits.data.checkins[Store.dayKey()].mood);
+      return `<div class="card ci-done"><span class="ci-emoji">${mood ? mood[1] : '✓'}</span><div><b>Checked in today</b><div class="small muted">${plural(n, 'day')} in a row · come back tomorrow for +5 XP</div></div></div>`;
+    }
+    return `<div class="card ci-card"><div class="row between"><div><b>Daily check-in</b><div class="small muted">How are you feeling today? <span class="xp-tag">+5 XP</span></div></div></div>
+      <div class="ci-moods">${Habits.MOODS.map(([v, e, l]) => `<button type="button" data-checkin="${v}" aria-label="${l}"><span>${e}</span><small>${l}</small></button>`).join('')}</div></div>`;
+  }
+  function habitCard(c) {
+    const s = Habits.stats(c), r = Habits.rankFor(s.currentDays), mp = milestoneProgress(s), ch = Habits.activeChallenge(c);
+    return `<a class="card hb-card" href="#/habit/${c.id}" style="--hc:${c.color}">
+      <div class="hb-ic">${hIcon(c)}</div>
+      <div class="hb-main">
+        <div class="hb-top"><h3>${esc(c.name)}</h3><span class="rank-pill" style="--rc:${r.rank.color}">${esc(r.rank.name)}</span></div>
+        <div class="hb-count"><b data-tick-days="${s.start}">${s.currentDays}</b><span>${s.currentDays === 1 ? 'day' : 'days'}</span><span class="hb-hm" data-tick="${s.start}">${since(s.currentMs)}</span></div>
+        <div class="prog-bar hb-bar"><i style="width:${(mp.pct * 100).toFixed(1)}%"></i></div>
+        <div class="small muted hb-foot">${mp.next ? `${plural(mp.next - s.currentDays, 'day')} to <b>${Habits.milestoneName(mp.next)}</b>` : 'Every milestone unlocked'}${ch ? ` · ${ICON.target} ${ch.days}-day challenge` : ''}${s.isBest ? ' · <b class="hb-best">Best ever</b>' : ''}</div>
+      </div>
+    </a>`;
+  }
+  function presetGrid() {
+    return `<div class="preset-grid">${Habits.PRESETS.map((p) => `<a class="preset" href="#/habits/new?p=${p.id}" style="--hc:${p.color}"><span class="hb-ic">${ICON[p.icon] || ICON.sparkle}</span><b>${esc(p.id === 'custom' ? 'Something else' : p.name)}</b></a>`).join('')}</div>`;
+  }
+  function badgeTile(a) {
+    return `<div class="badge-tile ${a.got ? 'got' : ''}" title="${esc(a.desc)}"><span class="badge-ic">${ICON[a.icon] || ICON.star}</span><b>${esc(a.name)}</b><small>${esc(a.desc)}</small><span class="xp-tag">${a.got ? '✓ ' : ''}+${a.xp} XP</span></div>`;
+  }
+
+  function habitsHome() {
+    const cs = Habits.list(), x = Habits.xpInfo(), ach = Habits.achievements();
+    const got = ach.filter((a) => a.got).length;
+    return {
+      tab: 'habits', title: 'Habits', accent: 'var(--habits)',
+      html: `
+      <div class="page-head"><h1>Habits</h1><p>Quit what holds you back. Every clean day, beaten urge and check-in earns XP.</p></div>
+      ${levelCard(x)}
+      <div class="quote-card">${ICON.sparkle}<p>${esc(Habits.lineOfDay())}</p></div>
+      ${checkinCard()}
+      ${section('Your counters', cs.length ? '<a href="#/habits/new">+ Add</a>' : '')}
+      ${cs.length ? cs.map(habitCard).join('') : `<div class="card hb-empty"><b>Start your first counter</b><p class="small muted">Pick what you want to quit. Your streak starts now and every milestone unlocks a reward.</p></div>${presetGrid()}`}
+      ${section('Rewards', `<a href="#/rewards">${got}/${ach.length} badges</a>`)}
+      <a class="card badges-peek" href="#/rewards">${ach.slice().sort((a, b) => b.got - a.got).slice(0, 6).map((a) => `<span class="badge-ic ${a.got ? 'got' : ''}" title="${esc(a.name)}">${ICON[a.icon] || ICON.star}</span>`).join('')}<span class="chev">${ICON.chev}</span></a>
+      <p class="small muted" style="margin:16px 4px 0">Counters sync privately with your account. Mark one as discreet to hide its name on the Today screen.</p>`,
+      after() { celebrate(); }
+    };
+  }
+
+  function habitNew() {
+    const pid = new URLSearchParams(location.hash.split('?')[1] || '').get('p');
+    if (!pid) {
+      return { tab: 'habits', title: 'New counter', accent: 'var(--habits)', back: '#/habits', html: `<div class="page-head"><h1>What do you want to quit?</h1><p>Pick one — you can rename it and add more later.</p></div>${presetGrid()}` };
+    }
+    return habitFormPage(null, Habits.preset(pid));
+  }
+  function habitEdit(id) { const c = Habits.get(id); return c ? habitFormPage(c, Habits.preset(c.preset)) : notFound(); }
+
+  function habitFormPage(c, p) {
+    const editing = !!c;
+    const v = c || { name: p.id === 'custom' ? '' : p.name, icon: p.icon, color: p.color, cost: p.cost ? '' : '', minutes: '', currency: Habits.defaultCurrency(), private: !!p.private, why: p.why || '', startAt: Date.now() };
+    const curOpts = Object.keys(Habits.CUR).map((k) => `<option value="${k}" ${(v.currency || Habits.defaultCurrency()) === k ? 'selected' : ''}>${k} ${Habits.CUR[k]}</option>`).join('');
+    const hasResets = editing && c.resets.length > 0;
+    return {
+      tab: 'habits', title: editing ? 'Edit counter' : 'New counter', accent: 'var(--habits)', back: editing ? '#/habit/' + c.id : '#/habits/new',
+      html: `
+      <div class="page-head"><h1>${editing ? 'Edit counter' : esc(p.id === 'custom' ? 'Your own counter' : p.name)}</h1>${!editing && p.why ? `<p>${esc(p.why)}</p>` : ''}</div>
+      <form class="card auth-form hb-form" id="habitForm" novalidate style="--hc:${v.color}">
+        <label class="fl">Name<input class="input" name="name" maxlength="40" required value="${esc(v.name)}" placeholder="e.g. No late-night snacks"></label>
+        <div class="fl">Icon<div class="hf-icons" data-hf="icon">${Habits.ICONS.map((k) => `<button type="button" data-v="${k}" class="${k === v.icon ? 'on' : ''}" aria-label="${k}">${ICON[k] || ''}</button>`).join('')}</div></div>
+        <div class="fl">Colour<div class="hf-colors" data-hf="color">${Habits.COLORS.map((k) => `<button type="button" data-v="${k}" class="${k === v.color ? 'on' : ''}" style="--sw:${k}" aria-label="Colour ${k}"></button>`).join('')}</div></div>
+        ${hasResets ? '' : `<div class="fl">${editing ? 'Started' : 'When did you start?'}
+          ${editing ? '' : `<div class="seg hf-seg" data-hf="when"><button type="button" data-v="now" class="active">Right now</button><button type="button" data-v="earlier">Earlier</button></div>`}
+          <input class="input" type="datetime-local" name="startAt" value="${toLocalInput(v.startAt)}" max="${toLocalInput(Date.now())}" ${editing ? '' : 'hidden'}></div>`}
+        <label class="fl">Your reason <span class="hint">Shown to you when an urge hits</span><textarea class="input st-ta" name="why" maxlength="140" rows="2" placeholder="Why does this matter to you?">${esc(v.why)}</textarea></label>
+        <div class="hf-pair">
+          <label class="fl">Money spent per day <span class="hint">Optional — tracks savings</span><div class="row" style="gap:8px"><select class="input" name="currency" style="max-width:110px">${curOpts}</select><input class="input" name="cost" type="number" min="0" step="0.5" inputmode="decimal" value="${v.cost || ''}" placeholder="${p.cost || 0}"></div></label>
+          <label class="fl">Minutes per day it took <span class="hint">Optional — tracks time reclaimed</span><input class="input" name="minutes" type="number" min="0" max="1440" step="5" inputmode="numeric" value="${v.minutes || ''}" placeholder="${p.minutes || 0}"></label>
+        </div>
+        <div class="field" style="padding:0"><div><label for="hf_priv">Discreet</label><div class="hint">Hide the name on the Today screen</div></div><label class="switch"><input type="checkbox" id="hf_priv" name="private" ${v.private ? 'checked' : ''}><span></span></label></div>
+        ${editing ? '' : `<div class="fl">Take a challenge <span class="hint">Commit to a goal for bonus XP</span><div class="hf-chips" data-hf="challenge"><button type="button" data-v="0" class="on">Not now</button>${Habits.CHALLENGE_DAYS.map((d) => `<button type="button" data-v="${d}">${d} days <small>+${Habits.challengeXP(d)}</small></button>`).join('')}</div></div>`}
+        <div class="form-msg" role="alert"></div>
+        <button class="btn btn-primary btn-block" type="submit">${editing ? 'Save changes' : `${ICON.flame} Start counter`}</button>
+      </form>
+      ${editing ? `<div class="card" style="margin-top:14px"><p class="small muted">Deleting removes this counter and its history from all your devices.</p><button class="btn btn-sm btn-danger" data-hb-act="delete" data-id="${c.id}" style="margin-top:10px">${ICON.trash} Delete counter</button></div>` : ''}`,
+      after(root) {
+        const form = $('#habitForm', root);
+        const pick = { icon: v.icon, color: v.color, when: 'now', challenge: 0 };
+        form.addEventListener('click', (e) => {
+          const b = e.target.closest('[data-hf] button'); if (!b) return;
+          const key = b.parentElement.dataset.hf;
+          pick[key] = b.dataset.v;
+          $$('button', b.parentElement).forEach((x) => { x.classList.toggle('on', x === b); x.classList.toggle('active', x === b); });
+          if (key === 'color') form.style.setProperty('--hc', b.dataset.v);
+          if (key === 'when') { const inp = $('[name="startAt"]', form); inp.hidden = b.dataset.v !== 'earlier'; if (!inp.hidden) inp.focus(); }
+        });
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const f = (n) => form.elements[n];
+          const msg = $('.form-msg', form);
+          const name = f('name').value.trim();
+          if (!name) { msg.className = 'form-msg err'; msg.textContent = 'Give your counter a name.'; f('name').focus(); return; }
+          let startAt = Date.now();
+          const si = f('startAt');
+          if (si && (editing || pick.when === 'earlier') && si.value) {
+            startAt = new Date(si.value).getTime();
+            if (!(startAt > 0) || startAt > Date.now() + 60e3) { msg.className = 'form-msg err'; msg.textContent = 'The start time can’t be in the future.'; return; }
+          }
+          const data = { name, icon: pick.icon, color: pick.color, why: f('why').value.trim(), cost: +f('cost').value || 0, minutes: +f('minutes').value || 0, currency: f('currency').value, private: f('private').checked };
+          if (editing) {
+            if (si && !hasResets) data.startAt = startAt;
+            Habits.update(c.id, data); toast('Saved'); location.hash = '#/habit/' + c.id;
+          } else {
+            const nc = Habits.add(Object.assign(data, { preset: p.id, startAt, challengeDays: +pick.challenge || 0 }));
+            location.hash = '#/habit/' + nc.id;
+          }
+        });
+      }
+    };
+  }
+
+  function bars(values, labels, o = {}) {
+    const max = Math.max(1, ...values);
+    return `<div class="hbars ${o.cls || ''}">${values.map((v, i) => `<div class="hbar ${o.hi === i ? 'hi' : ''}"><span class="bv">${o.fmt ? o.fmt(v) : v || ''}</span><div class="hbar-t"><i style="height:${Math.max(v ? 6 : 2, (v / max) * 100).toFixed(1)}%"></i></div><span class="bl">${labels[i]}</span></div>`).join('')}</div>`;
+  }
+
+  function habitDetail(id) {
+    const c = Habits.get(id); if (!c) return notFound();
+    const s = Habits.stats(c), r = Habits.rankFor(s.currentDays), mp = milestoneProgress(s), ins = Habits.insights(c), ch = Habits.activeChallenge(c);
+    const R = 52, CIRC = 2 * Math.PI * R;
+    const allCh = c.challenges || [];
+    const wonN = allCh.filter((x) => Habits.challengeStatus(c, x).status === 'won').length;
+    let chHtml;
+    if (ch) {
+      const cs = Habits.challengeStatus(c, ch);
+      const dayN = Math.min(ch.days, Math.floor((Date.now() - ch.startAt) / DAYMS) + 1);
+      chHtml = `<div class="card ch-card"><div class="row between"><div><b>${ch.days}-day challenge</b><div class="small muted">Day ${dayN} of ${ch.days} · ends ${new Date(cs.end).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</div></div><span class="xp-tag big">+${Habits.challengeXP(ch.days)} XP</span></div>
+        <div class="prog-bar" style="margin-top:12px"><i style="width:${(cs.progress * 100).toFixed(1)}%;background:${c.color}"></i></div>
+        <button class="link-quiet" data-hb-act="quitch" data-id="${c.id}">Give up this challenge</button></div>`;
+    } else {
+      chHtml = `<div class="card ch-card"><b>Take a challenge</b><div class="small muted">Commit to a number of days starting now. Make it — earn the reward.${wonN ? ` You’ve completed ${plural(wonN, 'challenge')} so far.` : ''}</div>
+        <div class="hf-chips" style="margin-top:12px">${Habits.CHALLENGE_DAYS.map((d) => `<button type="button" data-hb-ch="${d}" data-id="${c.id}">${d} days <small>+${Habits.challengeXP(d)}</small></button>`).join('')}</div></div>`;
+    }
+    const statBox = (val, label) => `<div class="hs"><b>${val}</b><span>${label}</span></div>`;
+    const DAYL = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    const hist = ins.history;
+    const patterns = ins.slips ? `
+      ${section('When slips happen')}
+      <div class="card">
+        <div class="small muted" style="margin-bottom:6px">By day of week</div>${bars(ins.weekday, DAYL, { hi: ins.weekday.indexOf(Math.max(...ins.weekday)) })}
+        <div class="small muted" style="margin:14px 0 6px">By time of day</div>${bars(Object.values(ins.parts), Object.keys(ins.parts), { cls: 'wide', hi: Object.values(ins.parts).indexOf(Math.max(...Object.values(ins.parts))) })}
+        ${Object.keys(ins.triggers).length ? `<div class="small muted" style="margin:14px 0 8px">Triggers</div><div class="trig-list">${Object.entries(ins.triggers).sort((a, b) => b[1] - a[1]).map(([t, n]) => `<span class="pill">${esc(t)} · ${n}</span>`).join('')}</div>` : ''}
+        ${ins.slips < 3 ? '<p class="small muted" style="margin-top:12px">Patterns get sharper after a few more entries.</p>' : ''}
+      </div>` : '';
+    const log = c.resets.slice(-8).reverse();
+    return {
+      tab: 'habits', title: c.name, accent: 'var(--habits)', back: '#/habits',
+      html: `
+      <div class="hb-hero" style="--hc:${c.color};--rc:${r.rank.color}">
+        <div class="hb-ring">
+          <svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="${R}" class="trk"/><circle cx="60" cy="60" r="${R}" class="val" stroke-dasharray="${CIRC.toFixed(1)}" stroke-dashoffset="${(CIRC * (1 - mp.pct)).toFixed(1)}"/></svg>
+          <div class="hb-ring-c"><span class="hb-ring-ic">${hIcon(c)}</span><b data-tick-days="${s.start}">${s.currentDays}</b><span>${s.currentDays === 1 ? 'day' : 'days'}</span></div>
+        </div>
+        <h1>${esc(c.name)}</h1>
+        <div class="hb-live" data-tick="${s.start}" data-fmt="long">${since(s.currentMs, true)}</div>
+        <div class="hb-rank"><span class="rank-pill big" style="--rc:${r.rank.color}">${ICON.trophy} ${esc(r.rank.name)}</span>${r.next ? `<span class="small muted">Next rank: <b>${esc(r.next.name)}</b> at ${r.next.d} days</span>` : ''}</div>
+        ${mp.next ? `<div class="small muted">${plural(mp.next - s.currentDays, 'day')} to <b>${Habits.milestoneName(mp.next)}</b> · +${Habits.milestoneXP(mp.next)} XP</div>` : ''}
+        ${c.why ? `<blockquote class="hb-why">“${esc(c.why)}”</blockquote>` : ''}
+      </div>
+      <div class="hb-actions">
+        <button class="btn btn-primary" data-hb-act="urge" data-id="${c.id}" style="--accent:${c.color}">${ICON.shield} I’m having an urge</button>
+        <button class="btn" data-hb-act="slip" data-id="${c.id}">I slipped</button>
+      </div>
+      ${chHtml}
+      ${section('Stats')}
+      <div class="hstats">
+        ${statBox(s.currentDays + 'd', 'Current streak')}
+        ${statBox(s.bestDays + 'd', 'Best streak')}
+        ${statBox(s.attempts, s.attempts === 1 ? 'Attempt' : 'Attempts')}
+        ${statBox(s.avgDays < 10 ? s.avgDays.toFixed(1) + 'd' : Math.round(s.avgDays) + 'd', 'Average streak')}
+        ${statBox(Math.round(s.successRate * 100) + '%', `Clean days (${s.cleanDays}/${s.totalDays})`)}
+        ${statBox(s.urges, 'Urges beaten')}
+        ${c.cost ? statBox(Habits.money(s.saved, c.currency), 'Money saved') : ''}
+        ${c.minutes ? statBox(Math.round(s.hoursBack) + 'h', 'Time reclaimed') : ''}
+      </div>
+      ${ins.lines.length ? section('Insights') + `<div class="card insight-list">${ins.lines.map((l) => `<div class="insight"><span class="ins-ic">${ICON[l.icon] || ICON.sparkle}</span><p>${l.text}</p></div>`).join('')}</div>` : ''}
+      ${hist.length > 1 ? section('Streak history') + `<div class="card">${bars(hist.map((d) => Math.round(d * 10) / 10), hist.map((_, i) => i === hist.length - 1 ? 'Now' : '#' + (s.attempts - hist.length + i + 1)), { hi: hist.length - 1, fmt: (v) => (v >= 10 ? Math.round(v) : v) + 'd' })}</div>` : ''}
+      ${patterns}
+      ${section('Milestones', `<span class="small muted">${Habits.MILESTONES.filter((m) => s.bestDays >= m).length}/${Habits.MILESTONES.length}</span>`)}
+      <div class="ms-grid">${Habits.MILESTONES.map((m) => { const got = s.bestDays >= m, rk = Habits.rankFor(m).rank; return `<div class="ms ${got ? 'got' : ''} ${mp.next === m ? 'next' : ''}" style="--rc:${rk.color}"><span class="ms-n">${m}</span><b>${Habits.milestoneName(m)}</b><small>+${Habits.milestoneXP(m)} XP</small></div>`; }).join('')}</div>
+      ${log.length ? section('Slip log') + `<div class="card slip-log">${log.map((x) => `<div class="slip"><b>${fmtWhen(x.at)}</b>${x.trigger ? `<span class="pill">${esc(x.trigger)}</span>` : ''}${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}</div>`).join('')}</div>` : ''}
+      <div class="row" style="gap:8px;margin-top:18px"><a class="btn btn-sm" href="#/habit/${c.id}/edit">${ICON.edit} Edit</a></div>`,
+      after() { celebrate(); }
+    };
+  }
+
+  function rewardsPage() {
+    const x = Habits.xpInfo(), ach = Habits.achievements();
+    const P = [['practice', 'Practice minutes', 'wind'], ['clean', 'Clean days', 'flame'], ['milestones', 'Milestones', 'trophy'], ['challenges', 'Challenges', 'target'], ['urges', 'Urges beaten', 'shield'], ['checkins', 'Check-ins', 'calendar'], ['badges', 'Badges', 'star']];
+    const LV = [[1, 'Novice'], [3, 'Seeker'], [5, 'Apprentice'], [8, 'Disciplined'], [12, 'Warrior'], [16, 'Master'], [20, 'Sage'], [25, 'Yogi'], [30, 'Enlightened']];
+    return {
+      tab: 'habits', title: 'Rewards', accent: 'var(--habits)', back: '#/habits',
+      html: `
+      <div class="page-head"><h1>Rewards</h1><p>XP comes from everything you do in Prana — practice, clean days, milestones, challenges, beaten urges and check-ins.</p></div>
+      ${levelCard(x)}
+      ${section('Where your XP comes from')}
+      <div class="card xp-list">${P.map(([k, l, i]) => `<div class="xp-row"><span class="ins-ic">${ICON[i]}</span><span>${l}</span><b>${x.parts[k].toLocaleString()}</b></div>`).join('')}</div>
+      <p class="small muted" style="margin:8px 4px 0">2 XP per practice minute · 10 XP per clean day · 15 XP per urge beaten (up to 5 a day) · 5 XP per check-in · bonuses for milestones, challenges and badges.</p>
+      ${section('Badges', `<span class="small muted">${ach.filter((a) => a.got).length}/${ach.length}</span>`)}
+      <div class="badge-grid">${ach.map(badgeTile).join('')}</div>
+      ${section('Counter ranks')}
+      <div class="card rank-ladder">${Habits.RANKS.map((rk) => `<div class="rank-row"><span class="rank-pill" style="--rc:${rk.color}">${esc(rk.name)}</span><span class="small muted">${rk.d ? rk.d + '+ days' : 'Start'}</span></div>`).join('')}</div>
+      ${section('Level titles')}
+      <div class="card rank-ladder">${LV.map(([l, t]) => `<div class="rank-row ${x.level >= l ? '' : 'locked'}"><b>${esc(t)}</b><span class="small muted">Level ${l}${x.level >= l ? ' ✓' : ''}</span></div>`).join('')}</div>`,
+      after() { celebrate(); }
+    };
+  }
+
+  // ---- sheets: urge SOS, slip, celebrations ------------------------------------------------
+  function openSheet(inner, bind) {
+    const el = UI.h(`<div class="sheet-backdrop" role="dialog" aria-modal="true"><div class="sheet hb-sheet">${inner}</div></div>`);
+    const close = () => el.remove();
+    el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('[data-close]')) close(); });
+    document.body.appendChild(el);
+    if (bind) bind(el, close);
+    return close;
+  }
+  function urgeSheet(c) {
+    const s = Habits.stats(c);
+    openSheet(`
+      <div class="sos-head" style="--hc:${c.color}">${ICON.shield}<div><h2>Ride the wave</h2><p class="small muted">Urges rise, peak and pass — usually within 15 minutes.</p></div></div>
+      <p class="sos-stake">You have <b>${s.currentDays ? plural(s.currentDays, 'day') : since(s.currentMs)}</b> on the line${s.bestDays > s.currentDays ? ` · best ${s.bestDays}d` : ''}.</p>
+      ${c.why ? `<blockquote class="hb-why">“${esc(c.why)}”</blockquote>` : ''}
+      <div class="sos-list">
+        <button data-sos='{"kind":"breath","id":"sigh","minutes":2}'><span class="ins-ic">${ICON.wind}</span><span><b>Physiological sigh</b><small>2 min · the fastest way to calm down</small></span></button>
+        <button data-sos='{"kind":"breath","id":"box","minutes":4}'><span class="ins-ic">${ICON.target}</span><span><b>Box breathing</b><small>4 min · steady, clear focus</small></span></button>
+        <button data-sos='{"kind":"workout","id":"seven"}'><span class="ins-ic">${ICON.bolt}</span><span><b>7-minute workout</b><small>Burn the energy off</small></span></button>
+      </div>
+      <p class="small muted sos-tips">Or: splash cold water on your face · walk for 10 minutes · text a friend · leave the room you’re in.</p>
+      <button class="btn btn-primary btn-block" data-sos-won style="--accent:${c.color}">💪 I beat this urge <span class="xp-tag light">+15 XP</span></button>
+      <button class="btn btn-ghost btn-block" data-close style="margin-top:6px">Close</button>`, (el, close) => {
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-sos]');
+        if (b) {
+          close();
+          Play.start(JSON.parse(b.dataset.sos), { onDone: () => { Habits.urge(c.id, { sos: true }); toast('Urge beaten with your breath — +15 XP'); } });
+          return;
+        }
+        if (e.target.closest('[data-sos-won]')) { Habits.urge(c.id); close(); toast('Urge beaten — +15 XP. That’s the muscle growing.'); Sound.success(); render(true); }
+      });
+    });
+  }
+  function slipSheet(c) {
+    const s = Habits.stats(c);
+    openSheet(`
+      <h2>Slipped up?</h2>
+      <p class="small muted" style="margin-top:4px">It happens. A slip is data, not a verdict. ${s.bestDays ? `Your best streak of <b>${plural(s.bestDays, 'day')}</b> stays on record.` : 'Every attempt teaches you something.'}</p>
+      <div class="fl" style="margin-top:16px;font-weight:650">When?</div>
+      <div class="seg hf-seg" data-slip-when style="margin-top:8px"><button type="button" data-v="now" class="active">Just now</button><button type="button" data-v="earlier">Earlier</button></div>
+      <input class="input" type="datetime-local" data-slip-at hidden value="${toLocalInput(Date.now())}" min="${toLocalInput(s.start + 60e3)}" max="${toLocalInput(Date.now())}">
+      <div class="fl" style="margin-top:14px;font-weight:650">What triggered it? <span class="hint" style="font-weight:500">optional — powers your insights</span></div>
+      <div class="hf-chips" data-slip-trig style="margin-top:8px">${Habits.TRIGGERS.map((t) => `<button type="button" data-v="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <textarea class="input st-ta" data-slip-note maxlength="280" rows="2" placeholder="Anything you want to remember? (optional)" style="margin-top:12px;width:100%"></textarea>
+      <button class="btn btn-block btn-danger" data-slip-go style="margin-top:14px">Reset counter</button>
+      <button class="btn btn-ghost btn-block" data-close style="margin-top:6px">Cancel</button>`, (el, close) => {
+      let when = 'now', trig = '';
+      el.addEventListener('click', (e) => {
+        const w = e.target.closest('[data-slip-when] button');
+        if (w) { when = w.dataset.v; $$('[data-slip-when] button', el).forEach((x) => x.classList.toggle('active', x === w)); $('[data-slip-at]', el).hidden = when !== 'earlier'; return; }
+        const t = e.target.closest('[data-slip-trig] button');
+        if (t) { trig = trig === t.dataset.v ? '' : t.dataset.v; $$('[data-slip-trig] button', el).forEach((x) => x.classList.toggle('on', x.dataset.v === trig)); return; }
+        if (e.target.closest('[data-slip-go]')) {
+          let at = Date.now();
+          if (when === 'earlier') { const v = $('[data-slip-at]', el).value; if (v) at = new Date(v).getTime(); }
+          const res = Habits.slip(c.id, { at, trigger: trig, note: $('[data-slip-note]', el).value });
+          close();
+          toast(res && res.best ? `Fresh start. Your best is ${plural(res.best, 'day')} — let’s beat it.` : 'Fresh start. You’ve got this.');
+          render(true);
+        }
+      });
+    });
+  }
+
+  let celebrating = false;
+  /** Discreet counters only hide their name on the Today screen. */
+  const hideName = (c) => !!(c && c.private && /^#?\/?$/.test(location.hash));
+  /** Show the biggest new reward (milestone, badge, challenge, level) with confetti. */
+  function celebrate() {
+    if (celebrating || Play.active || !window.Habits) return;
+    const ev = Habits.pending();
+    if (!ev.length) return;
+    const show = ev.filter((e) => !e.hidden);
+    Habits.markSeen(ev.map((e) => e.key));
+    if (!show.length) return;
+    celebrating = true;
+    const top = show[0], more = show.slice(1, 4);
+    const COLORS = ['#ff6b6b', '#ffd93d', '#6bcB77', '#4d96ff', '#c77dff', '#ff8fab', '#f9844a'];
+    const conf = Array.from({ length: 46 }, (_, i) => `<i style="left:${(Math.random() * 100).toFixed(1)}%;background:${COLORS[i % COLORS.length]};animation-delay:${(Math.random() * 0.6).toFixed(2)}s;animation-duration:${(2.2 + Math.random() * 1.6).toFixed(2)}s;transform:rotate(${Math.round(Math.random() * 360)}deg)"></i>`).join('');
+    let badge, title, sub;
+    if (top.type === 'milestone') {
+      badge = `<div class="cel-badge" style="--rc:${top.rank.color}"><b>${top.days}</b><small>${top.days === 1 ? 'DAY' : 'DAYS'}</small></div>`;
+      title = top.title + '!';
+      sub = `${hideName(top.c) ? 'Your counter' : esc(top.c.name)} · rank <b>${esc(top.rank.name)}</b>`;
+    } else if (top.type === 'level') {
+      badge = `<div class="cel-badge" style="--rc:#8a63f0"><small>LEVEL</small><b>${top.level}</b></div>`;
+      title = 'Level up!'; sub = `You’re now a <b>${esc(top.levelTitle)}</b>`;
+    } else {
+      badge = `<div class="cel-badge" style="--rc:${top.type === 'challenge' ? '#12a594' : '#d4a017'}">${ICON[top.type === 'challenge' ? 'target' : top.icon] || ICON.star}</div>`;
+      title = top.type === 'challenge' ? 'Challenge complete!' : 'Badge unlocked!';
+      sub = top.type === 'challenge' ? `${esc(top.title)}${top.c && !hideName(top.c) ? ' · ' + esc(top.c.name) : ''}` : `<b>${esc(top.title)}</b> — ${esc(top.desc)}`;
+    }
+    const el = UI.h(`<div class="cel-backdrop" role="dialog" aria-modal="true" aria-label="Reward">
+      <div class="confetti">${conf}</div>
+      <div class="cel-card">
+        ${badge}
+        <h2>${title}</h2>
+        <p>${sub}</p>
+        ${top.xp ? `<div class="xp-tag big">+${top.xp} XP</div>` : ''}
+        ${more.length ? `<div class="cel-more">${more.map((m) => `<span class="pill">${esc(m.type === 'milestone' ? m.title + ' · ' + (hideName(m.c) ? 'counter' : m.c.name) : m.title)}${m.xp ? ' · +' + m.xp + ' XP' : ''}</span>`).join('')}</div>` : ''}
+        <p class="small cel-line">${esc(Habits.lineOfDay(1))}</p>
+        <button class="btn btn-primary btn-block" data-cel-close style="--accent:#e0457b">Keep going</button>
+      </div></div>`);
+    const close = () => { el.remove(); celebrating = false; if (/^#\/(habits|habit\/|rewards|$)/.test(location.hash || '#/')) render(true); };
+    el.addEventListener('click', (e) => { if (e.target.closest('[data-cel-close]') || e.target === el) close(); });
+    document.body.appendChild(el);
+    Sound.success(); Sound.vibrate([30, 50, 30, 50, 80]);
+    setTimeout(() => { const b = $('[data-cel-close]', el); if (b) b.focus(); }, 50);
+  }
+
+  /** Counter chips on the Today screen. */
+  function todayHabits() {
+    const cs = Habits.list();
+    if (!cs.length) return `<a class="card hb-promo" href="#/habits"><span class="hb-ic" style="--hc:var(--habits)">${ICON.shield}</span><div style="flex:1;min-width:0"><b>Quit a habit for good</b><span class="small muted" style="display:block">No fap, no porn, alcohol, smoking, sugar, social media… track your streak and earn rewards.</span></div><span class="chev">${ICON.chev}</span></a>`;
+    return `${section('Your counters', '<a href="#/habits">Open</a>')}<div class="hb-strip">${cs.map((c) => { const s = Habits.stats(c); return `<a class="hb-chip" href="#/habit/${c.id}" style="--hc:${c.color}"><span class="hb-ic">${c.private ? ICON.lock : hIcon(c)}</span><span><b data-tick-days="${s.start}">${s.currentDays}</b><small> ${s.currentDays === 1 ? 'day' : 'days'}</small></span><em>${c.private ? 'Private' : esc(c.name)}</em></a>`; }).join('')}${Habits.checkedInToday() ? '' : `<a class="hb-chip ci-chip" href="#/habits"><span class="hb-ic" style="--hc:var(--habits)">${ICON.check}</span><span><b>Check in</b></span><em>+5 XP</em></a>`}</div>`;
+  }
+
+  // live counters: tick every second, re-render when a day rolls over
+  setInterval(() => {
+    const now = Date.now();
+    $$('[data-tick]').forEach((el) => { el.innerHTML = since(now - +el.dataset.tick, el.dataset.fmt === 'long'); });
+    let stale = false;
+    $$('[data-tick-days]').forEach((el) => { if (Math.floor((now - +el.dataset.tickDays) / DAYMS) !== +el.textContent) stale = true; });
+    if (stale && !Play.active && !$('.sheet-backdrop') && !$('.cel-backdrop') && document.activeElement && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { render(true); celebrate(); }
+  }, 1000);
 
   // ---------------------------------------------------------------------------
   // Programs
@@ -1083,6 +1456,7 @@
     [/^\/move$/, moveList], [/^\/workout\/([\w-]+)$/, workoutDetail], [/^\/exercise\/([\w-]+)$/, exerciseDetail],
     [/^\/yoga$/, yogaList], [/^\/flow\/([\w-]+)$/, flowDetail], [/^\/pose\/([\w-]+)$/, poseDetail],
     [/^\/mind$/, mindList], [/^\/meditation\/([\w-]+)$/, medDetail], [/^\/audio\/([\w-]+)$/, audioDetail], [/^\/studio$/, studio],
+    [/^\/habits$/, habitsHome], [/^\/habits\/new$/, habitNew], [/^\/habit\/([\w-]+)$/, habitDetail], [/^\/habit\/([\w-]+)\/edit$/, habitEdit], [/^\/rewards$/, rewardsPage],
     [/^\/programs$/, programsList], [/^\/program\/([\w-]+)$/, programDetail],
     [/^\/progress$/, progress], [/^\/settings$/, settings], [/^\/account$/, account]
   ];
@@ -1142,6 +1516,20 @@
       sb.textContent = speedLabel(st.speed);
       return;
     }
+    const ci = e.target.closest('[data-checkin]');
+    if (ci) { Habits.checkin(ci.dataset.checkin); toast('Checked in — +5 XP'); render(true); celebrate(); return; }
+    const ha = e.target.closest('[data-hb-act]');
+    if (ha) {
+      const c = Habits.get(ha.dataset.id); if (!c) return;
+      const act = ha.dataset.hbAct;
+      if (act === 'urge') urgeSheet(c);
+      else if (act === 'slip') slipSheet(c);
+      else if (act === 'quitch') { if (confirm('Give up this challenge? Your counter keeps running — you just won’t get the challenge reward.')) { Habits.quitChallenge(c.id); render(true); } }
+      else if (act === 'delete') { if (confirm(`Delete “${c.name}” and all its history? This can’t be undone.`)) { Habits.remove(c.id); toast('Counter deleted'); location.hash = '#/habits'; } }
+      return;
+    }
+    const hc = e.target.closest('[data-hb-ch]');
+    if (hc) { Habits.startChallenge(hc.dataset.id, +hc.dataset.hbCh); toast(`${hc.dataset.hbCh}-day challenge started — +${Habits.challengeXP(+hc.dataset.hbCh)} XP if you make it`); render(true); return; }
     const dlb = e.target.closest('[data-dl]');
     if (dlb) {
       const it = Library.get(dlb.dataset.dl); if (!it) return;

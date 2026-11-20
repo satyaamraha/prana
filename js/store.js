@@ -15,7 +15,8 @@
     log: [],        // [{id, at, day, kind, ref, title, sec, cat}]
     pbs: {},        // key -> {v, at}
     hist: {},       // key -> [{v, day}]
-    programs: {}    // id -> {start, done: [dayNumbers], last}
+    programs: {},   // id -> {start, done: [dayNumbers], last}
+    habits: { counters: {}, checkins: {}, urges: [], seen: {} }   // lifestyle counters (see habits.js)
   };
 
   const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -99,6 +100,8 @@
         lastAt: ps.map((p) => p.lastAt).filter(Boolean).sort().pop()
       };
     }
+    // lifestyle counters: union of events, newest edits win
+    if (window.Habits) out.habits = Habits.merge(a.habits, b.habits, cutoff);
     // settings & profile: newest wins, but keep device-only choices from `a` (this device)
     const newer = (b.settingsAt || 0) > (a.settingsAt || 0) ? b : a;
     out.settings = clone(newer.settings);
