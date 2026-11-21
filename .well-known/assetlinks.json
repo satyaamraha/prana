@@ -5,7 +5,10 @@
       "namespace": "android_app",
       "package_name": "com.retrogradearc.prana",
       "sha256_cert_fingerprints": [
-        "9F:4C:D8:45:EB:E8:B7:E8:16:99:22:BA:09:56:9F:9A:8B:81:72:77:EE:73:FB:43:84:75:35:C1:7F:DA:7E:DE"
+        "9F:4C:D8:45:EB:E8:B7:E8:16:99:22:BA:09:56:9F:9A:8B:81:72:77:EE:73:FB:43:84:75:35:C1:7F:DA:7E:DE",
+        "E8:82:8C:3D:86:C8:7E:68:BE:EC:23:E7:30:8B:41:58:42:C8:8F:4C:65:EE:FD:3D:94:12:EE:1D:CA:77:A2:25",
+        "3E:26:5D:E0:4B:7A:98:D6:B4:C2:1C:76:45:77:97:FA:88:D6:AA:7D:2F:76:64:08:2C:3C:E2:89:1D:2C:78:43",
+        "29:CB:BD:73:D6:0B:B5:58:C1:4B:03:E2:C9:0E:16:42:1B:28:06:4D:2D:07:C8:5F:84:9B:DE:CF:E8:9F:3C:9C"
       ]
     }
   }
