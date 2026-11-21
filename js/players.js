@@ -294,11 +294,13 @@
       this.open();
       const two = Store.data.settings.pip !== false;
       this.bar.innerHTML = '<div class="pl-progress"><i></i></div>';
+      this.body.classList.add('tm-body');
       this.body.innerHTML = `
         <div class="tm-stage ${two ? '' : 'single'}">
           <div class="tm-pane"><div class="fig-box"></div><span class="tm-lbl"></span></div>
           ${two ? '<div class="tm-pane"><div class="fig-box"></div><span class="tm-lbl"></span></div>' : ''}
         </div>
+        <div class="tm-side">
         <div class="tm-cap-row"><span class="stage-cap tm-cap"></span></div>
         <div class="tm-info"><div class="tm-badge" hidden></div><div class="tm-name"></div><div class="tm-sub"></div><div class="tm-breath" hidden></div></div>
         <div class="tm-row">
@@ -307,7 +309,8 @@
         </div>
         <div class="tm-next"></div>
         <div class="tm-cue"></div>
-        <div class="rest-ctl" hidden><button class="rest-btn" data-act="addrest">+10s rest</button><button class="rest-btn" data-act="next">I’m ready ${ICON.next}</button></div>`;
+        <div class="rest-ctl" hidden><button class="rest-btn" data-act="addrest">+10s rest</button><button class="rest-btn" data-act="next">I’m ready ${ICON.next}</button></div>
+        </div>`;
       this.controls.innerHTML = `
         <button class="pl-btn" data-act="prev" aria-label="Previous">${ICON.prev}</button>
         ${this.pauseButton()}
