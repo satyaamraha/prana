@@ -280,7 +280,8 @@
         return { x: cx - w / 2, y: bottom - hgt, w, h: hgt };
       }
       const cx = (bb.x0 + bb.x1) / 2;
-      let w = BOX_W;
+      const base = this.o.boxW || BOX_W;      // narrower box = bigger figure (used by the two-view panels)
+      let w = base;
       const need = bb.x1 - bb.x0 + 24;
       if (need > w) w = need;
       const top = Math.min(BOX_TOP * (w / BOX_W), bb.y0 - 10);
@@ -544,6 +545,27 @@
   }
   Figure.VIEWS = ['auto', 'side', 'front', 'back', 'top', 'q', 'orbit'];
   Figure.VIEW_LABEL = { auto: 'Auto', side: 'Side', front: 'Front', back: 'Back', top: 'Top', q: '3/4', orbit: '360°' };
+  /** The two clearest angles for a move: [main, second].
+   *  Standing/seated moves → side + front. Floor moves (plank, push-up, bridge…) → side + 3/4,
+   *  because a head-on front view of a horizontal body shows almost nothing. */
+  Figure.pairFor = (pose) => {
+    const q = normalize(pose || {});
+    if (q.v === 'f') return ['front', 'side'];
+    const horizontal = Math.abs((q.t1 == null ? 180 : q.t1) - 180) > 50;
+    return horizontal ? ['side', 'q'] : ['side', 'front'];
+  };
+  Figure.PAIR_LABEL = { side: 'Side view', front: 'Front view', q: '3/4 view', back: 'Back view', top: 'Top view' };
+  /** Draw several looping figures at the same scale so the views compare 1:1. */
+  Figure.shareScale = (figs) => {
+    const list = figs.filter((f) => f && f.cam && f.mode === 'loop');
+    if (list.length < 2) return;
+    const w = Math.max(...list.map((f) => f.cam.w)), h = Math.max(...list.map((f) => f.cam.h));
+    for (const f of list) {
+      const cx = f.cam.x + f.cam.w / 2, bottom = f.cam.y + f.cam.h;
+      f.cam = { x: cx - w / 2, y: bottom - h, w, h };
+      f._applyCam(f.cam);
+    }
+  };
   /** Three extra angles that complement the main one (front / side / back / top). */
   Figure.otherAngles = (main) => {
     const rest = ORTHO.filter((v) => v !== main);

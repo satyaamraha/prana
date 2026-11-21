@@ -411,7 +411,7 @@
   // Workouts
   // ===========================================================================
   const WORKOUTS = [
-    { id: 'seven', name: '7-Minute Full Body', tag: 'The science-backed classic, no equipment', level: 'All levels', icon: 'bolt', work: 30, rest: 10, rounds: 1,
+    { id: 'seven', name: '7-Minute Full Body', tag: 'The science-backed classic, no equipment', level: 'All levels', icon: 'bolt', work: 30, rest: 20, rounds: 1,
       items: ['jumping_jacks', 'wall_sit', 'pushups', 'crunches', 'high_knees', 'squats', 'superman', 'plank', 'march', 'reverse_lunges', 'mountain_climbers', 'side_plank'] },
     { id: 'morning', name: 'Morning Energizer', tag: 'Gentle wake-up for body and joints', level: 'Beginner', icon: 'sun', work: 40, rest: 15, rounds: 1,
       items: ['arm_circles', 'march', 'side_bends', 'squats', 'cat_cow', 'calf_raises', 'hip_hinge', 'cobra_stretch'] },

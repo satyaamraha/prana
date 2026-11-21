@@ -142,61 +142,50 @@
   const speedLabel = (v) => ({ 1: '1×', 0.5: '½×', 0.25: '¼×' }[v] || v + '×');
   const framesOf = (list) => list.map(([n, hh, t, label]) => ({ pose: Poses.get(n), h: hh, t, label }));
 
-  /** Demo stage: main view + three extra angles, camera switcher, optional speed button and step caption. */
+  /** Demo stage: two large, labelled camera angles side by side (or one, if turned off), speed button and step caption. */
   function stage(figSpec, opts = {}) {
-    const angles = S().pip !== false;
-    return `<div class="detail-stage${angles ? ' with-angles' : ''}">
-      <div class="stage-ui">
-        <div class="view-seg" role="group" aria-label="Camera angle">${Figure.VIEWS.filter((x) => x !== 'auto').map((x) => `<button type="button" data-view="${x}" aria-pressed="false">${Figure.VIEW_LABEL[x]}</button>`).join('')}</div>
-        ${opts.speed ? `<button type="button" class="speed-btn" data-speed aria-label="Playback speed">${speedLabel(st.speed || 1)}</button>` : ''}
+    const two = S().pip !== false;
+    return `<div class="detail-stage duo ${two ? '' : 'solo'}">
+      ${opts.speed ? `<div class="stage-ui"><span></span><button type="button" class="speed-btn" data-speed aria-label="Playback speed">${speedLabel(st.speed || 1)}</button></div>` : ''}
+      <div class="duo-grid">
+        <div class="duo-pane"><div class="fig-host" data-fig="${figSpec}" data-live="1"></div><span class="duo-lbl" data-duo-lbl="0"></span></div>
+        ${two ? '<div class="duo-pane"><div class="fig-host" data-duo2></div><span class="duo-lbl" data-duo-lbl="1"></span></div>' : ''}
       </div>
-      <div class="stage-main"><div class="fig-host" data-fig="${figSpec}" data-live="1"></div>${opts.cap ? '<div class="stage-cap" data-cap></div>' : ''}</div>
-      ${angles ? `<div class="angle-strip">${[0, 1, 2].map((k) => `<button type="button" class="angle-tile" data-angle-tile="${k}"><div class="angle-box"></div><span class="angle-lbl"></span></button>`).join('')}</div>` : ''}
+      ${opts.cap ? '<div class="stage-cap" data-cap></div>' : ''}
     </div>`;
   }
 
-  /** One live figure of a demo (main view or an extra angle). */
+  /** First pose of a demo — decides which two angles read best. */
+  function firstPoseOf(type, id) {
+    if (type === 'ex') return Poses.get(Content.EX[id].frames[0][0]);
+    if (type === 'yogalive') { const y = Content.yoga(id); return y.flowFrames ? null : Poses.get(y.pose); }
+    return null;   // flows (Sun Salutation, cat-cow) mix standing and floor poses → side + 3/4
+  }
+
+  /** One live figure of a demo. */
   function liveFigure(elm, type, id, o) {
+    const common = { view: o.view, fit: o.fit || 'fixed', boxW: o.boxW, speed: st.speed || 1, onPhase: o.onPhase || null };
     if (type === 'ex') {
       const e = Content.EX[id];
-      const f = new Figure(elm, { anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration', hl: e.hl, view: o.view, fit: o.fit || 'fixed', speed: st.speed || 1, onPhase: o.onPhase || null });
+      const f = new Figure(elm, Object.assign({ anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration', hl: e.hl }, common));
       return f.loop(framesOf(e.frames));
     }
     if (type === 'yogalive') {
       const y = Content.yoga(id);
-      const f = new Figure(elm, { label: y.name, mat: true, view: o.view, fit: o.fit || 'fixed', speed: st.speed || 1, onPhase: o.onPhase || null });
+      const f = new Figure(elm, Object.assign({ label: y.name, mat: true }, common));
       if (y.flowFrames) f.loop(framesOf(y.flowFrames.map((x, i) => [x[0], x[1], x[2], ['Cow — inhale', 'Cat — exhale'][i]])), { anchor: 'rhand' });
       else f.show(Poses.get(y.pose), { dur: 0 });
       return f;
     }
     if (type === 'surya') {
-      const f = new Figure(elm, { label: 'Sun Salutation demonstration', mat: true, view: o.view, fit: o.fit || 'fixed' });
+      const f = new Figure(elm, Object.assign({ label: 'Sun Salutation demonstration', mat: true }, common, { speed: 1 }));
       return f.show(Poses.get(Content.suryaSteps('R')[0].pose), { dur: 0 });
     }
     return null;
   }
 
-  /** Point a stage's extra-angle tiles at the views the main figure isn't showing. */
-  function syncGroup(g) {
-    const main = g.main.resolvedView();
-    const views = Figure.otherAngles(main);
-    g.tiles.forEach((t, k) => {
-      t.view = views[k];
-      t.f.setView(views[k]);
-      t.lbl.textContent = Figure.VIEW_LABEL[views[k]];
-      t.btn.setAttribute('aria-label', `Show the ${Figure.VIEW_LABEL[views[k]].toLowerCase()} view large`);
-    });
-    $$('[data-view]', g.stage).forEach((b) => { const on = b.dataset.view === main; b.classList.toggle('active', on); b.setAttribute('aria-pressed', String(on)); });
-  }
-  function setGroupView(g, v) {
-    S().view = v; Store.save();
-    g.main.setView(v);
-    syncGroup(g);
-  }
-
   function mountFigures(root) {
     liveFigs = []; liveGroups = [];
-    const view = S().view || 'auto';
     $$('[data-fig]', root).forEach((elm) => {
       const spec = elm.dataset.fig;
       const [type, id] = spec.split(':');
@@ -206,15 +195,22 @@
           const stageEl = elm.closest('.detail-stage');
           const capEl = $('[data-cap]', stageEl);
           const onPhase = capEl ? (i, label) => { capEl.textContent = label || ''; } : null;
-          const main = liveFigure(elm, type, id, { view, onPhase });
-          const tiles = $$('.angle-tile', stageEl).map((btn) => ({ btn, lbl: $('.angle-lbl', btn), f: liveFigure($('.angle-box', btn), type, id, { view: 'front', fit: 'tight' }) }));
-          const g = { main, tiles, stage: stageEl };
-          liveGroups.push(g);
-          liveFigs.push(main, ...tiles.map((t) => t.f));
-          syncGroup(g);
+          const first = firstPoseOf(type, id);
+          const pair = first ? Figure.pairFor(first) : ['side', 'q'];
+          const host2 = $('[data-duo2]', stageEl);
+          // floor moves (plank, push-up…) stack the views as full-width rows; standing moves sit side by side
+          const rows = !!host2 && pair[1] === 'q';
+          stageEl.classList.toggle('rows', rows);
+          const boxW = host2 && !rows ? 118 : undefined;
+          const fit = rows ? 'tight' : 'fixed';
+          const figs = [liveFigure(elm, type, id, { view: pair[0], boxW, fit, onPhase })];
+          if (host2) figs.push(liveFigure(host2, type, id, { view: pair[1], boxW, fit }));
+          figs.forEach((f, k) => { const l = $(`[data-duo-lbl="${k}"]`, stageEl); if (l) l.textContent = Figure.PAIR_LABEL[pair[k]]; });
+          Figure.shareScale(figs);
+          liveGroups.push({ figs, stage: stageEl });
+          liveFigs.push(...figs);
           if (type === 'surya') {
             const steps = Content.suryaSteps('R');
-            const figs = [main, ...tiles.map((t) => t.f)];
             let k = 0;
             const iv = setInterval(() => {
               if (!elm.isConnected) { clearInterval(iv); return; }
@@ -349,7 +345,7 @@
       html: `
       <div class="page-head">
         <div class="eyebrow" style="color:var(--muted)">${now.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
-        <h1>${greet}${name ? ', ' + esc(name) : ''}</h1>
+        <h1 class="greet">${greet}${name ? ', ' + esc(name) : ''}<button class="greet-edit" data-edit-name aria-label="${name ? 'Change your name' : 'Add your name'}">${name ? ICON.edit : ICON.edit + '<span>Add name</span>'}</button></h1>
       </div>
       <div class="card">
         <div class="today-top">
@@ -976,6 +972,8 @@
 
   // ---- sheets: urge SOS, slip, celebrations ------------------------------------------------
   function openSheet(inner, bind) {
+    if ($('.sheet-backdrop')) return () => {};      // one sheet at a time
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     const el = UI.h(`<div class="sheet-backdrop" role="dialog" aria-modal="true"><div class="sheet hb-sheet">${inner}</div></div>`);
     const close = () => el.remove();
     el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('[data-close]')) close(); });
@@ -1035,6 +1033,26 @@
           toast(res && res.best ? `Fresh start. Your best is ${plural(res.best, 'day')} — let’s beat it.` : 'Fresh start. You’ve got this.');
           render(true);
         }
+      });
+    });
+  }
+
+  /** Edit your name from anywhere (Today's greeting). */
+  function nameSheet() {
+    openSheet(`
+      <h2>What should we call you?</h2>
+      <p class="small muted" style="margin-top:4px">Used in your greeting. Leave empty to stay anonymous.</p>
+      <form data-name-form style="margin-top:14px">
+        <input class="input" name="n" maxlength="40" autocomplete="given-name" enterkeyhint="done" placeholder="Your name" value="${esc(Store.data.profile.name)}" style="width:100%;height:50px;font-size:17px">
+        <button class="btn btn-primary btn-block" type="submit" style="margin-top:12px">Save</button>
+      </form>
+      <button class="btn btn-ghost btn-block" data-close style="margin-top:6px">Cancel</button>`, (el, close) => {
+      const input = $('[name="n"]', el);
+      setTimeout(() => { input.focus(); input.select(); }, 60);
+      $('[data-name-form]', el).addEventListener('submit', (e) => {
+        e.preventDefault();
+        Store.data.profile.name = input.value.trim().slice(0, 40); Store.save();
+        close(); render(true); toast(Store.data.profile.name ? `Nice to meet you, ${Store.data.profile.name}` : 'Name removed');
       });
     });
   }
@@ -1258,7 +1276,7 @@
       ${Library.isAdmin() ? studioCard() : ''}
       ${PWA.standalone() ? '' : `<div class="card" style="padding:4px 16px;margin-bottom:12px"><div class="field"><div><label>Install app</label><div class="hint">Home-screen app that works offline</div></div><button class="btn btn-sm btn-primary" data-install style="--accent:var(--breathe)">${ICON.download} Install</button></div></div>`}
       <div class="card" style="padding:4px 16px">
-        <div class="field"><label for="setName">Name</label><input class="input" id="setName" value="${esc(Store.data.profile.name)}" style="max-width:180px"></div>
+        <div class="field"><label for="setName">Your name</label><input class="input" id="setName" value="${esc(Store.data.profile.name)}" placeholder="Add your name" autocomplete="given-name" enterkeyhint="done" maxlength="40" style="max-width:180px"></div>
         <div class="field" style="display:block"><label>Daily goal</label><div style="margin-top:10px">${picker('goal', [5, 10, 15, 20, 30, 45, 60], s.goal, (v) => v + ' min')}</div></div>
       </div>
       ${section('Guidance')}
@@ -1268,8 +1286,7 @@
         ${sw('sound', 'Sounds', 'Breath tones, bells and beeps')}
         ${sw('ambient', 'Ambient sound', 'Soft drone or rain during meditation')}
         ${sw('vibrate', 'Vibration', 'Haptic cues on supported phones')}
-        <div class="field"><div><label for="setView">Demo camera angle</label><div class="hint">Also switchable on any demo</div></div><select class="input" id="setView">${Figure.VIEWS.map((v) => `<option value="${v}" ${(s.view || 'auto') === v ? 'selected' : ''}>${Figure.VIEW_LABEL[v]}</option>`).join('')}</select></div>
-        ${sw('pip', 'Extra camera angles', 'Front, side, back and top views beside each demo')}
+        ${sw('pip', 'Two camera angles', 'Show every move from the side and the front at the same time')}
         <div class="field"><label>Test</label><button class="btn btn-sm" id="testVoice">${ICON.volume} Play sample</button></div>
       </div>
       ${section('Appearance')}
@@ -1295,11 +1312,15 @@
       </div>
       <p class="small muted" style="margin:18px 4px">Prana offers general wellness guidance and is not a substitute for medical advice. Consult a qualified professional before starting a new exercise or breathing practice, especially if you are pregnant or have a heart, respiratory, blood-pressure or seizure condition.</p>`,
       after(root) {
-        $('#setName', root).addEventListener('change', (e) => { Store.data.profile.name = e.target.value.trim().slice(0, 40); Store.save(); toast('Saved'); });
+        // Save as you type (phones often leave the page without "committing" the field).
+        const nameIn = $('#setName', root);
+        const saveName = () => { const v = nameIn.value.trim().slice(0, 40); if (v !== Store.data.profile.name) { Store.data.profile.name = v; Store.save(); } };
+        nameIn.addEventListener('input', saveName);
+        nameIn.addEventListener('change', () => { saveName(); toast(nameIn.value.trim() ? 'Name saved' : 'Name removed'); });
+        nameIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') nameIn.blur(); });
         $$('[data-set]', root).forEach((i) => i.addEventListener('change', () => { s[i.dataset.set] = i.checked; Store.save(); }));
         const sv = $('#setVoice', root); if (sv) sv.addEventListener('change', () => { s.voiceURI = sv.value; Store.save(); Sound.speak('Breathe in… and breathe out.'); });
         $('#testVoice', root).addEventListener('click', () => { Sound.unlock(); Sound.bell(); setTimeout(() => Sound.speak('Welcome to Prana. Breathe in… and breathe out.'), 400); });
-        $('#setView', root).addEventListener('change', (e) => { s.view = e.target.value; Store.save(); });
         $('#setTheme', root).addEventListener('change', (e) => { s.theme = e.target.value; Store.save(); applyTheme(); });
         $('#setRem', root).addEventListener('change', (e) => { s.reminder = e.target.value; Store.save(); });
         $('#addCal', root).addEventListener('click', () => { UI.download('prana-daily-practice.ics', makeICS(s.reminder), 'text/calendar'); toast('Open the downloaded file to add it to your calendar'); });
@@ -1513,25 +1534,13 @@
   view.addEventListener('click', (e) => {
     if (e.target.closest('[data-install]')) { PWA.install(); return; }
     if (e.target.closest('[data-share]')) { sharePrana(); return; }
+    if (e.target.closest('[data-edit-name]')) { nameSheet(); return; }
     if (e.target.closest('[data-sync-hide]')) { S().hideSyncNudge = true; Store.save(); toast('You can sign in any time from Settings'); render(true); return; }
     if (e.target.closest('[data-install-hide]')) { S().hideInstall = true; Store.save(); toast('You can install any time from Settings'); render(true); return; }
     const s = e.target.closest('[data-start]');
     if (s) {
       e.preventDefault();
       Play.start(JSON.parse(s.dataset.start));
-      return;
-    }
-    const vb = e.target.closest('[data-view]');
-    if (vb) {
-      const g = liveGroups.find((x) => x.stage.contains(vb));
-      if (g) setGroupView(g, vb.dataset.view);
-      return;
-    }
-    const tb = e.target.closest('[data-angle-tile]');
-    if (tb) {
-      const g = liveGroups.find((x) => x.stage.contains(tb));
-      const t = g && g.tiles[+tb.dataset.angleTile];
-      if (t && t.view) setGroupView(g, t.view);
       return;
     }
     const sb = e.target.closest('[data-speed]');

@@ -286,21 +286,19 @@
     return { frames: e.frames, anchor: e.anchor || 'hip', prop: e.prop || null, hl: e.hl };
   }
   function framesFrom(list) { return list.map(([n, h, t, label]) => ({ pose: Poses.get(n), h, t, label })); }
-  const VIEW_ORDER = Figure.VIEWS;
+  const LBL = Figure.PAIR_LABEL;
 
   class TimedSession extends Session {
     constructor(o) { super(o); this.items = o.items; this.i = -1; }
     start() {
       this.open();
+      const two = Store.data.settings.pip !== false;
       this.bar.innerHTML = '<div class="pl-progress"><i></i></div>';
       this.body.innerHTML = `
-        <div class="tm-stage">
-          <div class="tm-main">
-            <div class="fig-box"></div>
-            <div class="tm-badge" hidden></div>
-            <button class="tm-view" data-act="view" aria-label="Change camera angle"></button>
-          </div>
-          <div class="angle-strip tm-angles">${[0, 1, 2].map((k) => `<button class="angle-tile" data-act="angle${k}"><div class="angle-box"></div><span class="angle-lbl"></span></button>`).join('')}</div>
+        <div class="tm-stage ${two ? '' : 'single'}">
+          <div class="tm-pane"><div class="fig-box"></div><span class="tm-lbl"></span></div>
+          ${two ? '<div class="tm-pane"><div class="fig-box"></div><span class="tm-lbl"></span></div>' : ''}
+          <div class="tm-badge" hidden></div>
         </div>
         <div class="tm-cap-row"><span class="stage-cap tm-cap"></span></div>
         <div class="tm-info"><div class="tm-name"></div><div class="tm-sub"></div><div class="tm-breath" hidden></div></div>
@@ -308,88 +306,90 @@
           <div class="tm-timer"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="44"/><circle class="fg" cx="50" cy="50" r="44" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><div class="tm-time"></div></div>
           <div class="tm-reps" hidden><b></b><span class="small" style="opacity:.7">reps</span></div>
         </div>
+        <div class="tm-next"></div>
         <div class="tm-cue"></div>
-        <div class="rest-ctl" hidden><button class="rest-btn" data-act="addrest">+10s</button><button class="rest-btn" data-act="next">Skip rest ${ICON.next}</button></div>
-        <div class="tm-next"></div>`;
+        <div class="rest-ctl" hidden><button class="rest-btn" data-act="addrest">+10s rest</button><button class="rest-btn" data-act="next">I’m ready ${ICON.next}</button></div>`;
       this.controls.innerHTML = `
         <button class="pl-btn" data-act="prev" aria-label="Previous">${ICON.prev}</button>
         ${this.pauseButton()}
         <button class="pl-btn" data-act="next" aria-label="Skip">${ICON.next}</button>`;
       const q = (s) => $(s, this.root);
       this.el = {
-        box: q('.fig-box'), badge: q('.tm-badge'), name: q('.tm-name'), sub: q('.tm-sub'), breath: q('.tm-breath'),
+        badge: q('.tm-badge'), name: q('.tm-name'), sub: q('.tm-sub'), breath: q('.tm-breath'),
         timer: q('.tm-timer'), ring: q('.tm-timer .fg'), time: q('.tm-time'), cue: q('.tm-cue'), next: q('.tm-next'), prog: q('.pl-progress i'),
-        restCtl: q('.rest-ctl'), view: q('.tm-view'), stage: q('.tm-stage'), cap: q('.tm-cap')
+        restCtl: q('.rest-ctl'), stage: q('.tm-stage'), cap: q('.tm-cap'), labels: $$('.tm-lbl', this.root)
       };
-      const view = Store.data.settings.view || 'auto';
-      this.fig = new Figure(this.el.box, { anchor: 'hip', view, onPhase: (i, label) => { this.el.cap.textContent = label || ''; } });
-      // extra angles (front / side / back / top) beside the main view
-      this.tiles = [];
-      if (Store.data.settings.pip !== false) {
-        this.tiles = $$('.angle-tile', this.root).map((btn) => ({ btn, lbl: $('.angle-lbl', btn), f: new Figure($('.angle-box', btn), { anchor: 'hip', fit: 'tight', view: 'front', label: 'Extra camera angle' }) }));
-      } else this.el.stage.classList.add('single');
-      this.updateViewBtn();
+      const boxes = $$('.fig-box', this.root);
+      const boxW = two ? 118 : undefined;
+      this.panes = boxes.map((box, k) => new Figure(box, { anchor: 'hip', view: k ? 'front' : 'side', boxW, onPhase: k ? null : (i, label) => { this.el.cap.textContent = label || ''; } }));
+      this.fig = this.panes[0];
+      // flows mix standing and floor poses: keep one steady pair for the whole session
+      this.flowPair = this.kind === 'flow' ? ['side', 'q'] : null;
       this.planned = this.items.reduce((a, it) => a + it.sec, 0);
       this.enter(0);
     }
     cleanup() {
-      if (this.fig) { this.fig.destroy(); this.fig = null; }
-      for (const t of this.tiles || []) t.f.destroy();
-      this.tiles = [];
+      if (this.root) this.root.classList.remove('is-rest');
+      for (const f of this.panes || []) f.destroy();
+      this.panes = []; this.fig = null;
     }
-    /** Point the side tiles at the three angles the main view isn't showing. */
-    syncAngles() {
-      if (!this.tiles.length) return;
-      const views = Figure.otherAngles(this.fig.resolvedView());
-      this.tiles.forEach((t, k) => {
-        t.f.setView(views[k]);
-        t.view = views[k];
-        t.lbl.textContent = Figure.VIEW_LABEL[views[k]];
-        t.btn.setAttribute('aria-label', `Show ${Figure.VIEW_LABEL[views[k]]} view large`);
-      });
-    }
-    updateViewBtn() {
-      const v = Store.data.settings.view || 'auto';
-      this.el.view.innerHTML = `${ICON.repeat}<span>${Figure.VIEW_LABEL[v]}</span>`;
-    }
-    figs() { return [this.fig].concat((this.tiles || []).map((t) => t.f)).filter(Boolean); }
+    figs() { return (this.panes || []).filter(Boolean); }
     nextMain(from) { for (let j = from + 1; j < this.items.length; j++) if (this.items[j].kind !== 'rest') return this.items[j]; return null; }
     enter(i) {
       if (i >= this.items.length) { this.finish(true); return; }
       this.i = i; this.t = 0; this.cueIdx = 0; this.cueT = 0;
       const it = this.items[i];
       const nxt = this.nextMain(i);
-      const showDemo = it.kind === 'rest' && !it.demo && nxt ? nxt : it;
+      const isRest = it.kind === 'rest', isBreak = isRest && !it.trans;
+      const showDemo = isRest && !it.demo && nxt ? nxt : it;
       const d = showDemo.demo;
       this.el.cap.textContent = '';
       if (d && this.fig) {
-        for (const f of this.figs()) {
+        const first = d.frames ? Poses.get(d.frames[0][0]) : d.pose ? Poses.get(d.pose) : null;
+        const pair = this.flowPair || (first ? Figure.pairFor(first) : ['side', 'front']);
+        const two = this.figs().length > 1;
+        const rows = two && pair[1] === 'q';          // floor moves: full-width rows; standing: side by side
+        this.el.stage.classList.toggle('rows', rows);
+        this.figs().forEach((f, k) => {
+          const viewChanged = f.o.view !== pair[k];
+          f.o.view = pair[k];
+          f.o.boxW = two && !rows ? 118 : undefined;
+          f.o.fit = rows ? 'tight' : 'fixed';
+          if (this.el.labels[k]) this.el.labels[k].textContent = LBL[pair[k]] || '';
           if (d.frames) {
-            f.loop(framesFrom(d.frames), { anchor: d.anchor || 'hip', flip: !!d.flip, prop: d.prop || null, speed: it.kind === 'rest' ? 0.6 : 1, hl: d.hl || null });
+            f.loop(framesFrom(d.frames), { anchor: d.anchor || 'hip', flip: !!d.flip, prop: d.prop || null, speed: isBreak ? 0.5 : 1, hl: d.hl || null });
           } else if (d.pose) {
             const pose = Poses.get(d.pose);
-            const smooth = f.mode === 'show';
+            const smooth = f.mode === 'show' && !viewChanged;
             f.o.prop = null; f.o.speed = 1; f.o.hl = null;
             f.show(pose, { dur: smooth ? (d.dur || 1.3) : 0, anchor: d.anchor || pose.anchor || 'hip', flip: !!d.flip });
           }
-        }
-        this.syncAngles();
+        });
+        if (d.frames) Figure.shareScale(this.figs());
       }
-      const isRest = it.kind === 'rest';
+      // A rest must look like a rest: big "Rest", calm colours, dimmed preview of what's next.
+      this.root.classList.toggle('is-rest', isBreak);
       this.el.badge.hidden = !(isRest || it.kind === 'prep');
-      this.el.badge.textContent = isRest ? (it.badge || 'REST · NEXT UP') : 'GET READY';
-      this.el.name.textContent = isRest && nxt ? nxt.name : it.name;
-      this.el.sub.textContent = isRest ? (it.name || 'Rest') : (it.sub || '');
+      this.el.badge.textContent = isBreak ? 'REST' : isRest ? (it.badge || 'TRANSITION · NEXT') : 'GET READY';
+      if (isBreak) {
+        this.el.name.textContent = 'Rest';
+        const why = (it.name || '').replace(/^Rest\s*[—-]\s*/i, '') || 'Breathe and recover';
+        this.el.sub.textContent = why.charAt(0).toUpperCase() + why.slice(1);
+        this.el.next.innerHTML = nxt ? `<span>Next up</span> ${esc(nxt.name)}` : '';
+      } else {
+        this.el.name.textContent = isRest && nxt ? nxt.name : it.name;
+        this.el.sub.textContent = isRest ? (it.name || '') : (it.sub || '');
+        this.el.next.innerHTML = nxt && !isRest ? `<span>Next</span> ${esc(nxt.name)}` : '';
+      }
       this.el.breath.hidden = !it.breath;
       this.el.breath.textContent = it.breath || '';
-      this.el.next.textContent = nxt && !isRest ? 'Next: ' + nxt.name : '';
       this.cues = (isRest ? (it.cues || (nxt && nxt.cues)) : it.cues) || [];
       this.el.cue.textContent = this.cues[0] || '';
       this.el.restCtl.hidden = !(isRest && it.sec >= 8);
       $('[data-act="prev"]', this.root).disabled = i === 0;
       // voice + sound
       if (it.kind === 'prep') Sound.speak(`Get ready. ${nxt ? 'First up: ' + nxt.name : ''}`);
-      else if (isRest) { Sound.ding(); Sound.speak(it.say || (nxt ? (it.trans ? `Next: ${nxt.name}` : `Rest. Next up: ${nxt.name}`) : 'Rest'), { rate: 0.95 }); }
+      else if (isRest) { Sound.ding(); Sound.speak(it.say || (nxt ? (it.trans ? `Next: ${nxt.name}` : `Rest for ${Math.round(it.sec)} seconds. Next up: ${nxt.name}`) : 'Rest'), { rate: 0.95 }); }
       else if (it.kind === 'work') { Sound.go(); Sound.vibrate(60); Sound.speak(`${it.name}. ${it.sec} seconds. Go!`); }
       else if (it.kind === 'step') { Sound.ding(); Sound.speak(`${it.breath}. ${it.name}`, { rate: 1 }); }
       else if (it.kind === 'pose') { Sound.ding(); Sound.speak(`${it.name}${it.sub ? ', ' + it.sub : ''}. ${it.cues && it.cues[0] ? it.cues[0] : ''}`, { rate: 0.92 }); }
@@ -421,27 +421,13 @@
     onAction(a) {
       if (a === 'next') this.enter(this.i + 1);
       else if (a === 'addrest') { const it = this.items[this.i]; if (it && it.kind === 'rest') { it.sec += 10; this.planned += 10; this.render(); } }
-      else if (a === 'view') {
-        const s = Store.data.settings;
-        this.setMainView(VIEW_ORDER[(VIEW_ORDER.indexOf(s.view || 'auto') + 1) % VIEW_ORDER.length], true);
-      } else if (/^angle\d$/.test(a)) {
-        const t = this.tiles[+a.slice(5)];
-        if (t && t.view) this.setMainView(t.view, false);
-      }
       else if (a === 'prev') {
         let j = this.i - 1;
         while (j > 0 && this.items[j].kind === 'rest') j--;
         this.enter(Math.max(0, j));
       }
     }
-    setMainView(v, announce) {
-      const s = Store.data.settings;
-      s.view = v; Store.save();
-      this.fig.setView(v);
-      this.syncAngles();
-      this.updateViewBtn();
-      if (announce) UI.toast(`Camera: ${Figure.VIEW_LABEL[v]}`);
-    }
+    close() { if (this.root) this.root.classList.remove('is-rest'); super.close(); }
     onPause(p) { for (const f of this.figs()) p ? f.pause() : f.play(); if (!p) this.el.cue.textContent = this.cues[this.cueIdx] || ''; else this.el.cue.textContent = 'Paused — tap play to continue'; }
   }
 
