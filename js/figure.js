@@ -274,7 +274,10 @@
         const pad = 10;
         let w = bb.x1 - bb.x0 + pad * 2, hgt = bb.y1 - bb.y0 + pad * 2;
         const cx = (bb.x0 + bb.x1) / 2;
-        if (w / hgt < 1.25) w = hgt * 1.25; else hgt = w / 1.25;
+        // wide rows (floor moves) match the row's shape so a horizontal body fills it
+        let ar = 1.25;
+        if (this.o.fillRow) { const r = this.svg.getBoundingClientRect(); if (r.width && r.height) ar = Math.min(2.6, Math.max(1.25, r.width / r.height)); }
+        if (w / hgt < ar) w = hgt * ar; else hgt = w / ar;
         if (this.o.view === 'top') return { x: cx - w / 2, y: (bb.y0 + bb.y1) / 2 - hgt / 2, w, h: hgt };
         const bottom = Math.max(8, bb.y1 + pad);
         return { x: cx - w / 2, y: bottom - hgt, w, h: hgt };
@@ -554,6 +557,8 @@
     const horizontal = Math.abs((q.t1 == null ? 180 : q.t1) - 180) > 50;
     return horizontal ? ['side', 'q'] : ['side', 'front'];
   };
+  /** Horizontal bodies read best in wide rows: on narrow screens, or when the demo area is tall. */
+  Figure.stackRows = (el) => { const w = el.clientWidth || innerWidth, h = el.clientHeight || 0; return w < 560 || h > w * 0.6; };
   Figure.PAIR_LABEL = { side: 'Side view', front: 'Front view', q: '3/4 view', back: 'Back view', top: 'Top view' };
   /** Draw several looping figures at the same scale so the views compare 1:1. */
   Figure.shareScale = (figs) => {

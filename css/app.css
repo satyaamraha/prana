@@ -129,6 +129,18 @@ svg { display: block; }
 .view-enter { animation: viewIn .28s ease both; }
 @keyframes viewIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
+/* Laptops: exercise / pose pages use the full width — demo left (sticky), details right */
+@media (min-width: 1000px) and (min-aspect-ratio: 5/4) {
+  body.wide-page #app { max-width: 1400px; }
+  body.wide-page #view { padding-left: 32px; padding-right: 32px; }
+  .detail-wrap { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(380px, 1fr); gap: 36px; align-items: start; }
+  .detail-media { position: sticky; top: 74px; }
+  .detail-media .detail-stage.duo { aspect-ratio: auto; height: clamp(380px, calc(100vh - 74px - var(--tabbar-h) - 40px), 760px); padding: 14px; }
+  .detail-media .detail-stage.duo .duo-grid { gap: 14px; }
+  .detail-media .duo-pane > .fig-host { inset: 36px 10px 10px; }
+  .detail-media .duo-lbl { top: 12px; left: 16px; font-size: 12px; }
+  .detail-info > .detail-title:first-child { margin-top: 4px; }
+}
 /* Tab bar ----------------------------------------------------------------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;

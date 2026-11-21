@@ -352,13 +352,14 @@
         const two = this.figs().length > 1;
         // floor moves on a narrow screen: two full-width rows; otherwise side by side.
         // Flows (Sun Salutation) mix standing and floor poses, so they stay side by side.
-        const rows = two && pair[1] === 'q' && !this.flowPair && (this.el.stage.clientWidth || innerWidth) < 560;
+        const rows = two && pair[1] === 'q' && !this.flowPair && Figure.stackRows(this.el.stage);
         this.el.stage.classList.toggle('rows', rows);
         this.figs().forEach((f, k) => {
           const viewChanged = f.o.view !== pair[k];
           f.o.view = pair[k];
           f.o.boxW = two && !rows ? 118 : undefined;
           f.o.fit = rows ? 'tight' : 'fixed';
+          f.o.fillRow = rows;
           if (this.el.labels[k]) this.el.labels[k].textContent = LBL[pair[k]] || '';
           if (d.frames) {
             f.loop(framesFrom(d.frames), { anchor: d.anchor || 'hip', flip: !!d.flip, prop: d.prop || null, speed: isBreak ? 0.5 : 1, hl: d.hl || null });

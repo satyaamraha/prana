@@ -155,6 +155,9 @@
     </div>`;
   }
 
+  /** Detail page: on laptops the demo sits on the left (stays in view) and the details on the right. */
+  const detailLayout = (media, info) => `<div class="detail-wrap"><div class="detail-media">${media}</div><div class="detail-info">${info}</div></div>`;
+
   /** First pose of a demo — decides which two angles read best. */
   function firstPoseOf(type, id) {
     if (type === 'ex') return Poses.get(Content.EX[id].frames[0][0]);
@@ -164,7 +167,7 @@
 
   /** One live figure of a demo. */
   function liveFigure(elm, type, id, o) {
-    const common = { view: o.view, fit: o.fit || 'fixed', boxW: o.boxW, speed: st.speed || 1, onPhase: o.onPhase || null };
+    const common = { view: o.view, fit: o.fit || 'fixed', fillRow: o.fit === 'tight', boxW: o.boxW, speed: st.speed || 1, onPhase: o.onPhase || null };
     if (type === 'ex') {
       const e = Content.EX[id];
       const f = new Figure(elm, Object.assign({ anchor: e.anchor || 'hip', prop: e.prop || null, label: e.name + ' demonstration', hl: e.hl }, common));
@@ -200,7 +203,7 @@
           const host2 = $('[data-duo2]', stageEl);
           // floor moves (plank, push-up…) stack the views as full-width rows; standing moves sit side by side
           // (only on narrow screens; Sun Salutation mixes standing and floor poses, so it stays side by side)
-          const rows = !!host2 && pair[1] === 'q' && type !== 'surya' && (stageEl.clientWidth || innerWidth) < 560;
+          const rows = !!host2 && pair[1] === 'q' && type !== 'surya' && Figure.stackRows(stageEl);
           stageEl.classList.toggle('rows', rows);
           const boxW = host2 && !rows ? 118 : undefined;
           const fit = rows ? 'tight' : 'fixed';
@@ -525,9 +528,8 @@
     const secs = st.exSecs, sets = PF().exSets, rest = PF().exRest;
     const dur = (v) => v < 60 ? v + 's' : fmt(v);
     return {
-      tab: 'move', title: e.name, accent: 'var(--move)', back: '#/move',
-      html: `
-      ${stage('ex:' + e.id, { speed: true, cap: true })}
+      tab: 'move', title: e.name, accent: 'var(--move)', back: '#/move', wide: true,
+      html: detailLayout(stage('ex:' + e.id, { speed: true, cap: true }), `
       <div class="detail-title"><div class="eyebrow">${esc(e.level)}</div><h1>${esc(e.name)}</h1><p>${esc(e.muscles)}</p></div>
       ${e.hl.length ? '<div class="legend-hl" style="margin-top:10px"><i></i> Muscles worked are highlighted in the demo</div>' : ''}
       ${section('How to do it')}${listSteps(e.steps)}
@@ -538,7 +540,7 @@
         <div class="field" style="display:block"><label>Sets</label><div style="margin-top:8px">${picker('p:exSets', [1, 2, 3, 4, 5], sets)}</div></div>
         ${sets > 1 ? `<div class="field" style="display:block"><label>Rest between sets</label><div style="margin-top:8px">${picker('p:exRest', [15, 30, 45, 60, 90], rest, (v) => v + 's')}</div></div>` : ''}
       </div>
-      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'exercise', id: e.id, seconds: secs, sets, rest })}>${ICON.play} ${sets > 1 ? `${sets} × ${dur(secs)}` : 'Practice ' + dur(secs)}</button></div>`
+      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'exercise', id: e.id, seconds: secs, sets, rest })}>${ICON.play} ${sets > 1 ? `${sets} × ${dur(secs)}` : 'Practice ' + dur(secs)}</button></div>`)
     };
   }
 
@@ -572,10 +574,9 @@
       const min = Math.round(Content.flowSeconds(f, { rounds, pace, roundRest }) / 60);
       const steps = Content.suryaSteps('R');
       return {
-        tab: 'yoga', title: f.name, accent: 'var(--yoga)', back: '#/yoga',
-        html: `
-        ${stage('surya')}
-        <p class="small" style="text-align:center;margin:-6px 0 14px" data-surya-cap><b>1. Prayer Pose</b> · Exhale</p>
+        tab: 'yoga', title: f.name, accent: 'var(--yoga)', back: '#/yoga', wide: true,
+        html: detailLayout(`${stage('surya')}
+        <p class="small" style="text-align:center;margin:-6px 0 14px" data-surya-cap><b>1. Prayer Pose</b> · Exhale</p>`, `
         <div class="detail-title"><div class="eyebrow">${esc(f.level)}</div><h1>${esc(f.name)}</h1><div class="sk">${esc(f.sub)}</div><p>${esc(f.about)}</p></div>
         ${section('Rounds')}${picker('suryaRounds', [1, 2, 3, 5, 8, 12], rounds)}
         ${section('Pace')}${picker('p:suryaPace', [7, 5, 4], pace, (v) => ({ 7: 'Slow', 5: 'Steady', 4: 'Brisk' }[v]))}
@@ -583,7 +584,7 @@
         ${section('The 12 postures')}
         <div class="card ex-list" style="padding:6px 14px">${steps.map((s, i) => `<div class="ex-row"><div class="ex-fig" data-fig="pose:${s.pose}"></div><div><div class="ex-name">${i + 1}. ${esc(s.name)}</div><div class="small muted"><i>${esc(s.sk)}</i> · ${esc(s.breath)}</div></div></div>`).join('')}</div>
         ${caution('Move gently and within your range. Avoid if you have recent back, wrist or shoulder injuries; in pregnancy, practise a modified version with a teacher.')}
-        <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'flow', id: 'surya', rounds, pace, roundRest })}>${ICON.play} Start · ${rounds} rounds · ${min} min</button></div>`
+        <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'flow', id: 'surya', rounds, pace, roundRest })}>${ICON.play} Start · ${rounds} rounds · ${min} min</button></div>`)
       };
     }
     const pause = PF().flowPause;
@@ -609,16 +610,15 @@
     const secs = st['ps_' + id] || y.hold;
     const opts = [...new Set([15, 30, 45, 60, 90, 180, y.hold])].sort((a, b) => a - b);
     return {
-      tab: 'yoga', title: y.name, accent: 'var(--yoga)', back: '#/yoga',
-      html: `
-      ${stage('yogalive:' + y.id, { cap: !!y.flowFrames })}
+      tab: 'yoga', title: y.name, accent: 'var(--yoga)', back: '#/yoga', wide: true,
+      html: detailLayout(stage('yogalive:' + y.id, { cap: !!y.flowFrames }), `
       <div class="detail-title"><div class="eyebrow">${esc(y.cat)} · ${esc(y.level)}</div><h1>${esc(y.name)}</h1><div class="sk">${esc(y.sk)}</div><p>“${esc(y.cue)}”</p></div>
       ${section('How to')}${listSteps(y.steps)}
       ${section('Benefits')}${listDots(y.benefits)}
       ${caution(y.caution)}
       ${section('Hold')}${picker('ps_' + id, opts, secs, (v) => v < 60 ? v + 's' : fmt(v))}
       ${y.sides ? '<p class="small muted" style="margin-top:8px">Held on each side.</p>' : ''}
-      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'pose', id: y.id, seconds: secs })}>${ICON.play} Practice ${secs < 60 ? secs + 's' : fmt(secs)}${y.sides ? ' each side' : ''}</button></div>`
+      <div class="sticky-cta"><button class="btn btn-primary" ${start({ kind: 'pose', id: y.id, seconds: secs })}>${ICON.play} Practice ${secs < 60 ? secs + 's' : fmt(secs)}${y.sides ? ' each side' : ''}</button></div>`)
     };
   }
 
@@ -1518,6 +1518,7 @@
     if (!Store.data.profile.onboarded && path !== '/' && path !== '/account') { v = onboarding(); }
     current = v;
     view.style.setProperty('--accent', v.accent || 'var(--breathe)');
+    document.body.classList.toggle('wide-page', !!v.wide);
     view.innerHTML = v.html;
     view.classList.remove('view-enter'); void view.offsetWidth; if (!keepScroll) view.classList.add('view-enter');
     $$('.tabbar a').forEach((a) => a.classList.toggle('active', a.dataset.tab === v.tab));
