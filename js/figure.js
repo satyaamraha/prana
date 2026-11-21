@@ -147,6 +147,84 @@
     return q;
   }
 
+  /** Transition between two held poses the way a body would move: each joint is
+   * blended relative to its parent within its natural range (so a knee never bends
+   * backwards and a torso never swings down through the legs), and the trunk turns
+   * the short way round. Loops (exercise reps) keep the plain blend in lerpK. */
+  const wrapTo = (a, lo) => { let x = (a - lo) % 360; if (x < 0) x += 360; return x + lo; };
+  // [key, parent, low end of the natural range of (key − parent)]: hip −270 ⇒ flexion −90…270, knee −270 ⇒ flexion −90…270
+  const JOINTS = [
+    ['t2', 't1', -180], ['hd', 't2', -180],
+    ['la1', 't2', -120, 'L'], ['ra1', 't2', -120, 'R'], ['la2', 'la1', -90], ['ra2', 'ra1', -90],
+    ['ll1', 't1', -270], ['rl1', 't1', -270], ['ll2', 'll1', -270], ['rl2', 'rl1', -270], ['lf', 'll2', -60], ['rf', 'rl2', -60]
+  ];
+  // shoulder: 0 = arm alongside the body, + = raised forward (side view) / outward (front view, right arm)
+  function toJoints(q) {
+    const J = { t1: q.t1 };
+    for (const [k, par, lo, side] of JOINTS) {
+      let rel = (q[k] || 0) - (q[par] || 0);
+      if (side) { rel += 180; if (q.v === 'f' && side === 'L') rel = -rel; }
+      J[k] = wrapTo(rel, lo);
+    }
+    return J;
+  }
+  function lerpJ(A, B, u) {
+    const q = lerpK(A, B, u);
+    const a = toJoints(A.q), b = toJoints(B.q);
+    let d = wrapTo(b.t1 - a.t1, -180);
+    q.t1 = a.t1 + d * u;
+    for (const [k, par, , side] of JOINTS) {
+      let rel = lerp(a[k], b[k], u);
+      if (side) { if (q.v === 'f' && side === 'L') rel = -rel; rel -= 180; }
+      q[k] = q[par] + rel;
+    }
+    return q;
+  }
+
+  /** Which parts of the body rest on the floor (solved skeleton, floor at Y = 0). */
+  function supportOf(P) {
+    const on = (k, r) => P[k][1] + RAD[r] >= -4;
+    const g = new Set();
+    if (on('lan', 'an') || on('lto', 'to') || on('ran', 'an') || on('rto', 'to')) g.add('feet');
+    if (on('lkn', 'kn') || on('rkn', 'kn')) g.add('knees');
+    if (on('lha', 'ha') || on('rha', 'ha')) g.add('hands');
+    const pelvis = on('hip', 'hip') || on('mid', 'mid');
+    return { g, pelvis };
+  }
+  /** How far (units) the body's centre of mass is outside the parts touching the floor. */
+  function imbalance(P, v) {
+    const ax = v === 'f' ? 2 : 0, m = (a, b) => (P[a][ax] + P[b][ax]) / 2;
+    let sum = m('hip', 'neck') * 46 + P.head[ax] * 8, W = 54;
+    for (const s of ['l', 'r']) {
+      sum += m(s + 'hp', s + 'kn') * 10 + m(s + 'kn', s + 'an') * 4.5 + m(s + 'an', s + 'to') * 1.5 + m(s + 'sh', s + 'el') * 3 + m(s + 'el', s + 'ha') * 2.5;
+      W += 21.5;
+    }
+    const c = sum / W;
+    let lo = 1e9, hi = -1e9;
+    // parts within a few units of the floor read as touching it
+    const touch = (x, y, r) => { if (y + r >= -12) { lo = Math.min(lo, x); hi = Math.max(hi, x); } };
+    for (const [k, r] of PTS) touch(P[k][ax], P[k][1], RAD[r]);
+    for (const t of [0.25, 0.5, 0.75]) for (const [a, b] of [['hip', 'mid'], ['mid', 'neck']]) touch(lerp(P[a][ax], P[b][ax], t), lerp(P[a][1], P[b][1], t), 7);
+    return Math.max(0, lo - c, c - hi);   // how far the centre of mass is outside the support
+  }
+  /** Can one pose flow into the other by blending joints? Otherwise (rolling over,
+   * lying down to standing…) a cross-fade is shown instead of an impossible morph. */
+  const MORPH_TOL = 40;   // units the centre of mass may drift past the support mid-move
+  function canMorph(A, B) {
+    // chest direction: ±180 = facing the ceiling, 0 = facing the floor (side-view poses)
+    const face = (K) => (K.v === 'f' ? 90 : Math.abs(wrapTo(K.q.t1 - 90, -180)));
+    const fa = face(A), fb = face(B), up = (f) => f >= 120, down = (f) => f <= 60;
+    if ((up(fa) && down(fb)) || (down(fa) && up(fb))) return false;   // rolling over
+    const a = supportOf(A.P), b = supportOf(B.P);
+    let shared = 0;
+    for (const x of a.g) if (b.g.has(x)) shared++;
+    const onBack = up(fa) && up(fb);   // lying on the back throughout: lower/lift hips, slide legs
+    if (!onBack && !(shared >= 2 || (shared >= 1 && a.pelvis === b.pelvis))) return false;
+    // and every in-between frame must be something a body could hold
+    for (const u of [0.25, 0.5, 0.75]) if (imbalance(solve(lerpJ(A, B, ease(u))).P, A.v) > MORPH_TOL) return false;
+    return true;
+  }
+
   /** Project 3D points: cam {th, ph, flip, ox, oz}. Returns [screenX, screenY, depth]. */
   function project(P, cam) {
     const ct = Math.cos(cam.th * D2R), st = Math.sin(cam.th * D2R);
@@ -368,9 +446,10 @@
       const anchorKey = ANCHOR[o.anchor || pose.anchor || 'hip'] || 'hip';
       const dur = o.dur != null ? o.dur : 1.1;
       this.mode = 'show'; this.order = '';
-      if (!this.cur || this.cur.K.v !== K.v || this.cur.flip !== flip || dur === 0) {
+      const jump = this.cur && dur > 0 && this.cur.K.v === K.v && !canMorph(this._curState().K, K);
+      if (!this.cur || this.cur.K.v !== K.v || this.cur.flip !== flip || dur === 0 || jump) {
         const W = [-K.P[anchorKey][0], -K.P[anchorKey][2]];
-        const viewChanged = this.cur && this.cur.K.v !== K.v;
+        const viewChanged = (this.cur && this.cur.K.v !== K.v) || jump;
         this.from = null;
         this.cur = { K, W, flip };
         this.cam = this._camFor(this._bboxShow(K, W, flip));
@@ -393,7 +472,7 @@
         const u = Math.min(1, (this.t - this.from.start) / this.from.dur);
         if (u < 1) {
           const e = ease(u);
-          const q = lerpK(this.from.K, this.cur.K, e);
+          const q = lerpJ(this.from.K, this.cur.K, e);
           const s = solve(q);
           return { K: { q: s.q, ik: q.ik, v: q.v, P: s.P }, W: [lerp(this.from.W[0], this.cur.W[0], e), lerp(this.from.W[1], this.cur.W[1], e)], P: s.P };
         }
@@ -432,7 +511,7 @@
         if (this.from) {
           const u = Math.min(1, (this.t - this.from.start) / this.from.dur);
           const e = ease(u);
-          q = lerpK(this.from.K, this.cur.K, e);
+          q = lerpJ(this.from.K, this.cur.K, e);
           W = [lerp(this.from.W[0], this.cur.W[0], e), lerp(this.from.W[1], this.cur.W[1], e)];
           const a = this.from.camFrom, b = this.from.camTo;
           this.cam = { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e) };
