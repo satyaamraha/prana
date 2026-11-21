@@ -199,7 +199,8 @@
           const pair = first ? Figure.pairFor(first) : ['side', 'q'];
           const host2 = $('[data-duo2]', stageEl);
           // floor moves (plank, push-up…) stack the views as full-width rows; standing moves sit side by side
-          const rows = !!host2 && pair[1] === 'q';
+          // (only on narrow screens; Sun Salutation mixes standing and floor poses, so it stays side by side)
+          const rows = !!host2 && pair[1] === 'q' && type !== 'surya' && (stageEl.clientWidth || innerWidth) < 560;
           stageEl.classList.toggle('rows', rows);
           const boxW = host2 && !rows ? 118 : undefined;
           const fit = rows ? 'tight' : 'fixed';

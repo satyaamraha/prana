@@ -298,10 +298,9 @@
         <div class="tm-stage ${two ? '' : 'single'}">
           <div class="tm-pane"><div class="fig-box"></div><span class="tm-lbl"></span></div>
           ${two ? '<div class="tm-pane"><div class="fig-box"></div><span class="tm-lbl"></span></div>' : ''}
-          <div class="tm-badge" hidden></div>
         </div>
         <div class="tm-cap-row"><span class="stage-cap tm-cap"></span></div>
-        <div class="tm-info"><div class="tm-name"></div><div class="tm-sub"></div><div class="tm-breath" hidden></div></div>
+        <div class="tm-info"><div class="tm-badge" hidden></div><div class="tm-name"></div><div class="tm-sub"></div><div class="tm-breath" hidden></div></div>
         <div class="tm-row">
           <div class="tm-timer"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="44"/><circle class="fg" cx="50" cy="50" r="44" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><div class="tm-time"></div></div>
           <div class="tm-reps" hidden><b></b><span class="small" style="opacity:.7">reps</span></div>
@@ -348,7 +347,9 @@
         const first = d.frames ? Poses.get(d.frames[0][0]) : d.pose ? Poses.get(d.pose) : null;
         const pair = this.flowPair || (first ? Figure.pairFor(first) : ['side', 'front']);
         const two = this.figs().length > 1;
-        const rows = two && pair[1] === 'q';          // floor moves: full-width rows; standing: side by side
+        // floor moves on a narrow screen: two full-width rows; otherwise side by side.
+        // Flows (Sun Salutation) mix standing and floor poses, so they stay side by side.
+        const rows = two && pair[1] === 'q' && !this.flowPair && (this.el.stage.clientWidth || innerWidth) < 560;
         this.el.stage.classList.toggle('rows', rows);
         this.figs().forEach((f, k) => {
           const viewChanged = f.o.view !== pair[k];
