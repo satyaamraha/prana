@@ -1,2 +1,13 @@
 .DS_Store
 .claude/
+# Android build output and signing secrets (keys live in ~/.prana-android, never here)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/*.iml
+*.jks
+*.keystore
+keystore.properties
+dist/

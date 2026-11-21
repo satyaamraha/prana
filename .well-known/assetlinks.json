@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.retrogradearc.prana",
+      "sha256_cert_fingerprints": [
+        "9F:4C:D8:45:EB:E8:B7:E8:16:99:22:BA:09:56:9F:9A:8B:81:72:77:EE:73:FB:43:84:75:35:C1:7F:DA:7E:DE"
+      ]
+    }
+  }
+]

@@ -1,0 +1,67 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The release signing key lives OUTSIDE this (public) repository:
+//   ~/.prana-android/keystore.properties  → storeFile, storePassword, keyAlias, keyPassword
+// Back up that folder — you need the same key to ship updates.
+def keystoreProps = new Properties()
+def keystorePropsFile = new File(System.getProperty('user.home'), '.prana-android/keystore.properties')
+if (keystorePropsFile.exists()) keystorePropsFile.withInputStream { keystoreProps.load(it) }
+
+// The Trusted Web Activity opens the live site full-screen (no browser UI).
+def twa = [
+    host           : 'prana.retrogradearc.com',
+    launchPath     : '/?source=twa',
+    themeColor     : '#12A594',   // status bar
+    navColor       : '#F5F4FA',   // navigation bar
+    splashColor    : '#F5F4FA',
+]
+
+android {
+    namespace 'com.retrogradearc.prana'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.retrogradearc.prana'
+        minSdk 24   // Android 7.0+, required by androidbrowserhelper
+        targetSdk 36
+        // Bump both for every release you upload to Google Play.
+        versionCode 1
+        versionName '1.0.0'
+
+        resValue 'string', 'launchUrl', "https://${twa.host}${twa.launchPath}"
+        resValue 'string', 'hostName', twa.host
+        resValue 'color', 'colorPrimary', twa.themeColor
+        resValue 'color', 'navigationColor', twa.navColor
+        resValue 'color', 'backgroundColor', twa.splashColor
+        manifestPlaceholders = [hostName: twa.host]
+    }
+
+    signingConfigs {
+        if (keystorePropsFile.exists()) {
+            release {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (keystorePropsFile.exists()) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4'
+}

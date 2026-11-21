@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Prana</string>
+    <!-- Pairs with https://prana.retrogradearc.com/.well-known/assetlinks.json so the app opens full-screen. -->
+    <string name="asset_statements" translatable="false">
+        [{
+            \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+            \"target\": {\"namespace\": \"web\", \"site\": \"https://prana.retrogradearc.com\"}
+        }]
+    </string>
+    <string name="sc_habits">Habits</string>
+    <string name="sc_calm">Calm down</string>
+    <string name="sc_calm_long">Calm down fast (2 min)</string>
+    <string name="sc_workout">Workout</string>
+    <string name="sc_meditate">Meditate</string>
+</resources>

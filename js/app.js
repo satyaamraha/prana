@@ -8,6 +8,24 @@
   // ---------------------------------------------------------------------------
   // Install (PWA)
   // ---------------------------------------------------------------------------
+  // Running inside the Android app (Trusted Web Activity)? Its start URL carries ?source=twa.
+  const IN_TWA = (() => {
+    try {
+      if (/[?&]source=twa\b/.test(location.search) || document.referrer.indexOf('android-app://com.retrogradearc.prana') === 0) sessionStorage.setItem('prana.twa', '1');
+      return sessionStorage.getItem('prana.twa') === '1';
+    } catch (e) { return false; }
+  })();
+  const APK_URL = 'https://github.com/satyaamraha/prana/releases/latest/download/prana.apk';
+  const SHARE_URL = 'https://prana.retrogradearc.com/';
+  async function sharePrana() {
+    const data = { title: 'Prana', text: 'Prana — breathing, workouts, yoga, meditation and habit tracking. Free, no ads.', url: SHARE_URL };
+    try {
+      if (navigator.share) { await navigator.share(data); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(`${data.text} ${data.url}`); toast('Link copied — paste it anywhere'); }
+    catch (e) { prompt('Copy this link to share Prana:', data.url); }
+  }
+
   const PWA = (() => {
     let deferred = null;
     const ua = navigator.userAgent;
@@ -1265,9 +1283,15 @@
       </div>
       ${section('Your data')}
       <div class="card" style="padding:4px 16px">
-        <div class="field"><div><label>Backup</label><div class="hint">Everything is stored only on this device.</div></div><button class="btn btn-sm" id="exportBtn">${ICON.download} Export</button></div>
+        <div class="field"><div><label>Backup</label><div class="hint">${Sync.user ? 'Stored on this device and synced to your account' : 'Everything is stored only on this device'}</div></div><button class="btn btn-sm" id="exportBtn">${ICON.download} Export</button></div>
         <div class="field"><label>Restore</label><label class="btn btn-sm" style="cursor:pointer">${ICON.upload} Import<input type="file" id="importFile" accept="application/json,.json" hidden></label></div>
         <div class="field"><label>Reset</label><button class="btn btn-sm btn-danger" id="resetBtn">Erase all data</button></div>
+      </div>
+      ${section('Share & about')}
+      <div class="card" style="padding:4px 16px">
+        <div class="field"><div><label>Share Prana</label><div class="hint">Send it to a friend — it’s free</div></div><button class="btn btn-sm btn-primary" data-share style="--accent:var(--breathe)">${ICON.heart} Share</button></div>
+        ${/Android/i.test(navigator.userAgent) && !IN_TWA ? `<div class="field"><div><label>Android app</label><div class="hint">Install the app from a file</div></div><a class="btn btn-sm" href="${APK_URL}">${ICON.download} Get APK</a></div>` : ''}
+        <div class="field"><label>Privacy policy</label><a class="btn btn-sm" href="privacy.html">Read</a></div>
       </div>
       <p class="small muted" style="margin:18px 4px">Prana offers general wellness guidance and is not a substitute for medical advice. Consult a qualified professional before starting a new exercise or breathing practice, especially if you are pregnant or have a heart, respiratory, blood-pressure or seizure condition.</p>`,
       after(root) {
@@ -1488,6 +1512,7 @@
   // Delegated interactions within views
   view.addEventListener('click', (e) => {
     if (e.target.closest('[data-install]')) { PWA.install(); return; }
+    if (e.target.closest('[data-share]')) { sharePrana(); return; }
     if (e.target.closest('[data-sync-hide]')) { S().hideSyncNudge = true; Store.save(); toast('You can sign in any time from Settings'); render(true); return; }
     if (e.target.closest('[data-install-hide]')) { S().hideInstall = true; Store.save(); toast('You can install any time from Settings'); render(true); return; }
     const s = e.target.closest('[data-start]');

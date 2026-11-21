@@ -16,6 +16,11 @@
 	header /js/* Cache-Control "no-cache"
 	header /icons/* Cache-Control "public, max-age=86400"
 
+	# Android app ↔ site verification (Trusted Web Activity). Must be JSON, no redirects.
+	@assetlinks path /.well-known/assetlinks.json
+	header @assetlinks Content-Type "application/json"
+	header @assetlinks Cache-Control "public, max-age=3600"
+
 	@manifest path *.webmanifest
 	header @manifest Content-Type "application/manifest+json"
 

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon for these. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="habits"
+        android:shortcutShortLabel="@string/sc_habits">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="https://prana.retrogradearc.com/?source=twa#/habits"
+            android:targetClass="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:targetPackage="com.retrogradearc.prana" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="calm"
+        android:shortcutLongLabel="@string/sc_calm_long"
+        android:shortcutShortLabel="@string/sc_calm">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="https://prana.retrogradearc.com/?source=twa#/breathe/sigh"
+            android:targetClass="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:targetPackage="com.retrogradearc.prana" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="workout"
+        android:shortcutShortLabel="@string/sc_workout">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="https://prana.retrogradearc.com/?source=twa#/workout/seven"
+            android:targetClass="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:targetPackage="com.retrogradearc.prana" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="meditate"
+        android:shortcutShortLabel="@string/sc_meditate">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="https://prana.retrogradearc.com/?source=twa#/mind"
+            android:targetClass="com.google.androidbrowserhelper.trusted.LauncherActivity"
+            android:targetPackage="com.retrogradearc.prana" />
+    </shortcut>
+</shortcuts>
