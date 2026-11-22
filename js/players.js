@@ -149,6 +149,9 @@
   // ===========================================================================
   // Breathing (also powers the breath challenges)
   // ===========================================================================
+  const COUNTED = new Set(['in', 'in2', 'out', 'hold', 'holdOut']);
+  const NUM_WORD = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen'];
+
   class BreathSession extends Session {
     constructor(o) { super(o); this.segs = o.segs; this.idx = -1; this.segT = 0; }
     start() {
@@ -222,7 +225,9 @@
     }
     update(dt) {
       const s = this.segs[this.idx]; if (!s) return;
+      const before = this.segT;
       this.segT += dt;
+      this.countAloud(s, before);
       if (s.k === 'free') { if (this.segT > 600) this.action('tap'); }
       else if (this.segT >= s.d) {
         if (s.onEnd) this.record(s.onEnd.rec, s.onEnd.v);
@@ -230,6 +235,14 @@
         return;
       }
       this.render();
+    }
+    /** Say the number shown in the orb as it ticks down ("Breathe in… three, two, one"). */
+    countAloud(s, before) {
+      if (s.quiet || s.pump || Store.data.settings.countAloud === false) return;
+      if (!COUNTED.has(s.k) || !(s.d >= 3 && s.d <= 16)) return;
+      const shown = (t) => Math.ceil(s.d - t - 0.001);
+      const now = shown(this.segT);
+      if (now < shown(before) && now >= 1 && this.segT >= 0.9) Sound.speak(NUM_WORD[now] || String(now), { rate: 1.05 });
     }
     render() {
       const s = this.segs[this.idx];

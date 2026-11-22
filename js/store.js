@@ -6,7 +6,7 @@
     v: 1,
     profile: { name: '', onboarded: false, created: null },
     settings: {
-      voice: true, sound: true, vibrate: true, ambient: true,
+      voice: true, countAloud: true, sound: true, vibrate: true, ambient: true,
       goal: 10, voiceURI: '', theme: 'auto', reminder: '07:30',
       view: 'auto', pip: true,  // demo camera angle; second angle in the player
       // remembered rest & timing choices

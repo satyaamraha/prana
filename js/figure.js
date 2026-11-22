@@ -168,7 +168,7 @@
     }
     return J;
   }
-  function lerpJ(A, B, u) {
+  function lerpJ(A, B, u, arc) {
     const q = lerpK(A, B, u);
     const a = toJoints(A.q), b = toJoints(B.q);
     let d = wrapTo(b.t1 - a.t1, -180);
@@ -178,7 +178,30 @@
       if (side) { if (q.v === 'f' && side === 'L') rel = -rel; rel -= 180; }
       q[k] = q[par] + rel;
     }
+    // a foot that travels along the floor is lifted instead: bend hip and knee mid-step
+    if (arc) {
+      const b = Math.min(1, 2.5 * Math.sin(Math.PI * u));   // lift early, land late
+      for (const s of ['l', 'r']) {
+        if (!arc[s]) continue;
+        const hipFlex = wrapTo(q[s + 'l1'] - q.t1 + 180, -90), kneeFlex = wrapTo(q[s + 'l1'] - q[s + 'l2'], -90);
+        const lift = Math.min(35, Math.max(0, 165 - hipFlex)) * b;   // never fold a joint past its range
+        const bend = Math.min(70, Math.max(0, 175 - kneeFlex)) * b;
+        q[s + 'l1'] += lift; q[s + 'l2'] += lift - bend; q[s + 'f'] += lift - bend;
+      }
+    }
     return q;
+  }
+  /** Which feet must step (on the floor before and after, but far apart) when the anchor stays put. */
+  function stepArcs(A, B, key) {
+    if (A.v !== 's' || B.v !== 's') return null;
+    const dx = A.P[key][0] - B.P[key][0];
+    const down = (P, s) => P[s + 'an'][1] + RAD.an >= -2 || P[s + 'to'][1] + RAD.to >= -2;
+    let arc = null;
+    for (const s of ['l', 'r']) {
+      if (key === s + 'to' || key === s + 'an') continue;
+      if (down(A.P, s) && down(B.P, s) && Math.abs(B.P[s + 'an'][0] + dx - A.P[s + 'an'][0]) > 25) (arc = arc || {})[s] = true;
+    }
+    return arc;
   }
 
   /** Which parts of the body rest on the floor (solved skeleton, floor at Y = 0). */
@@ -210,7 +233,8 @@
   /** Can one pose flow into the other by blending joints? Otherwise (rolling over,
    * lying down to standing…) a cross-fade is shown instead of an impossible morph. */
   const MORPH_TOL = 40;   // units the centre of mass may drift past the support mid-move
-  function canMorph(A, B) {
+  const SLIDE_MAX = { an: 30, kn: 30, ha: 30, to: 45 };   // how far a part may slide while on the floor
+  function canMorph(A, B, arc, key) {
     // chest direction: ±180 = facing the ceiling, 0 = facing the floor (side-view poses)
     const face = (K) => (K.v === 'f' ? 90 : Math.abs(wrapTo(K.q.t1 - 90, -180)));
     const fa = face(A), fb = face(B), up = (f) => f >= 120, down = (f) => f <= 60;
@@ -221,7 +245,21 @@
     const onBack = up(fa) && up(fb);   // lying on the back throughout: lower/lift hips, slide legs
     if (!onBack && !(shared >= 2 || (shared >= 1 && a.pelvis === b.pelvis))) return false;
     // and every in-between frame must be something a body could hold
-    for (const u of [0.25, 0.5, 0.75]) if (imbalance(solve(lerpJ(A, B, ease(u))).P, A.v) > MORPH_TOL) return false;
+    for (const u of [0.25, 0.5, 0.75]) if (imbalance(solve(lerpJ(A, B, ease(u), arc)).P, A.v) > MORPH_TOL) return false;
+    // nothing may skate along the floor (the anchor stays pinned; stepping feet are lifted)
+    const ax = A.v === 'f' ? 2 : 0, pin = A.P[key][ax], last = {}, slid = {};
+    const parts = PTS.filter(([k]) => SLIDE_MAX[k.slice(1)] && (k[0] === 'l' || k[0] === 'r'));
+    for (const [k, r] of parts) if (A.P[k][1] + RAD[r] >= -1.5) last[k] = A.P[k][ax];
+    for (let i = 1; i <= 10; i++) {
+      const P = solve(lerpJ(A, B, ease(i / 10), arc)).P, shift = pin - P[key][ax];
+      for (const [k, r] of parts) {
+        if (P[k][1] + RAD[r] >= -1.5) {
+          const x = P[k][ax] + shift;
+          if (k in last && (slid[k] = (slid[k] || 0) + Math.abs(x - last[k])) > SLIDE_MAX[k.slice(1)]) return false;
+          last[k] = x;
+        } else delete last[k];
+      }
+    }
     return true;
   }
 
@@ -460,19 +498,25 @@
       const anchorKey = ANCHOR[o.anchor || pose.anchor || 'hip'] || 'hip';
       const dur = o.dur != null ? o.dur : 1.1;
       this.mode = 'show'; this.order = '';
-      const jump = this.cur && dur > 0 && this.cur.K.v === K.v && !canMorph(this._curState().K, K);
+      const prev = this.cur ? this._curState() : null;
+      let arc = null, jump = false;
+      if (prev && dur > 0 && this.cur.K.v === K.v && this.cur.flip === flip) {
+        arc = stepArcs(prev.K, K, anchorKey);
+        jump = !canMorph(prev.K, K, arc, anchorKey);
+      }
       if (!this.cur || this.cur.K.v !== K.v || this.cur.flip !== flip || dur === 0 || jump) {
         const W = [-K.P[anchorKey][0], -K.P[anchorKey][2]];
-        const viewChanged = (this.cur && this.cur.K.v !== K.v) || jump;
+        const viewChanged = (this.cur && (this.cur.K.v !== K.v || this.cur.flip !== flip)) || jump;
         this.from = null;
         this.cur = { K, W, flip };
         this.cam = this._camFor(this._bboxShow(K, W, flip));
         this._applyCam(this.cam);
         if (viewChanged) this._fade();
       } else {
-        const prev = this._curState();
         const Wn = [prev.W[0] + prev.P[anchorKey][0] - K.P[anchorKey][0], prev.W[1] + prev.P[anchorKey][2] - K.P[anchorKey][2]];
-        this.from = { K: prev.K, W: prev.W, camFrom: this.cam, start: this.t, dur };
+        // the anchor (planted hand/foot) stays exactly where it is for the whole move
+        const pin = [prev.W[0] + prev.P[anchorKey][0], prev.W[1] + prev.P[anchorKey][2]];
+        this.from = { K: prev.K, W: prev.W, camFrom: this.cam, start: this.t, dur, arc, key: anchorKey, pin };
         this.cur = { K, W: Wn, flip };
         this.from.camTo = this._camFor(this._bboxShow(K, Wn, flip));
       }
@@ -486,9 +530,9 @@
         const u = Math.min(1, (this.t - this.from.start) / this.from.dur);
         if (u < 1) {
           const e = ease(u);
-          const q = lerpJ(this.from.K, this.cur.K, e);
-          const s = solve(q);
-          return { K: { q: s.q, ik: q.ik, v: q.v, P: s.P }, W: [lerp(this.from.W[0], this.cur.W[0], e), lerp(this.from.W[1], this.cur.W[1], e)], P: s.P };
+          const q = lerpJ(this.from.K, this.cur.K, e, this.from.arc);
+          const s = solve(q), f = this.from;
+          return { K: { q: s.q, ik: q.ik, v: q.v, P: s.P }, W: [f.pin[0] - s.P[f.key][0], f.pin[1] - s.P[f.key][2]], P: s.P };
         }
       }
       return { K: this.cur.K, W: this.cur.W, P: this.cur.K.P };
@@ -521,12 +565,13 @@
           this.o.onPhase(this.phase, k && k.label);
         }
       } else if (this.mode === 'show' && this.cur) {
-        let q, W;
+        let q, W, pin = null;
         if (this.from) {
           const u = Math.min(1, (this.t - this.from.start) / this.from.dur);
           const e = ease(u);
-          q = lerpJ(this.from.K, this.cur.K, e);
+          q = lerpJ(this.from.K, this.cur.K, e, this.from.arc);
           W = [lerp(this.from.W[0], this.cur.W[0], e), lerp(this.from.W[1], this.cur.W[1], e)];
+          if (u < 1) pin = this.from;
           const a = this.from.camFrom, b = this.from.camTo;
           this.cam = { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e) };
           this._applyCam(this.cam);
@@ -537,6 +582,7 @@
         }
         if (this.o.idle) this._idle(q);
         const { P } = solve(q);
+        if (pin) W = [pin.pin[0] - P[pin.key][0], pin.pin[1] - P[pin.key][2]];
         const a = this._angles(this.cur.K.v);
         this._render(P, { th: a.th, ph: a.ph, flip: this.cur.flip, ox: W[0], oz: W[1] }, q.v);
       }

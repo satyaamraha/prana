@@ -96,11 +96,15 @@ for ex, frames in EX.items():
         for kk, r in chk.PTS:
             if kk == seg or kk[0] not in 'lr' or kk[1:] not in ('an', 'to', 'ha', 'kn'): continue
             if PA[kk][1] + chk.RAD[r] < -2: continue
-            drag = 0
-            for k in range(1, 10):
+            drag, prev = 0, PA[kk][ax] - PA[seg][ax]
+            for k in range(1, 11):
                 q = lerpK(A, B, ease(k / 10)); P, _ = solve(q)
                 if P[kk][1] + chk.RAD[r] >= -1.5:
-                    drag = max(drag, abs((P[kk][ax] - P[seg][ax]) - (PA[kk][ax] - PA[seg][ax])))
+                    x = P[kk][ax] - P[seg][ax]
+                    if prev is not None: drag += abs(x - prev)   # slid while staying on the floor
+                    prev = x
+                else:
+                    prev = None
             if drag > 6: probs.append(f"  {a[0]} → {b[0]}: {kk} drags {drag:.0f} along the floor")
         if worst[0] > 12 or worst[2]:
             probs.append(f"  {a[0]} → {b[0]}: off-balance {worst[0]:.0f} at {worst[1]}" + (f"; joints {worst[2]}" if worst[2] else ''))

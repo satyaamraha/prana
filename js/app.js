@@ -1283,6 +1283,7 @@
       ${section('Guidance')}
       <div class="card" style="padding:4px 16px">
         ${sw('voice', 'Voice guidance', Sound.hasTTS ? 'Spoken cues during sessions' : 'Not supported in this browser')}
+        ${Sound.hasTTS ? sw('countAloud', 'Count breaths aloud', 'Says the seconds left in each inhale, hold and exhale') : ''}
         ${voices.length ? `<div class="field"><label for="setVoice">Voice</label><select class="input" id="setVoice" style="max-width:200px"><option value="">Automatic</option>${voices.map((v) => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === s.voiceURI ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>` : ''}
         ${sw('sound', 'Sounds', 'Breath tones, bells and beeps')}
         ${sw('ambient', 'Ambient sound', 'Soft drone or rain during meditation')}
