@@ -11,3 +11,4 @@ android/*.iml
 *.keystore
 keystore.properties
 dist/
+__pycache__/

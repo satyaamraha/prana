@@ -7,7 +7,7 @@
     // ---- Standing ----------------------------------------------------------
     stand: { lf: 90, rf: 90, anchor: 'lto' },
     standF: { v: 'f', la1: -8, la2: -6, ra1: 8, ra2: 6, ll1: -3, ll2: -2, rl1: 3, rl2: 2, anchor: 'hip' },
-    standWide: { v: 'f', la1: -8, la2: -6, ra1: 8, ra2: 6, ll1: -14, ll2: -14, rl1: 14, rl2: 14 },
+    standWide: { v: 'f', la1: -8, la2: -6, ra1: 8, ra2: 6, ll1: -32, ll2: -32, rl1: 32, rl2: 32 },   // side-lunge stance: same foot spacing as the lunges
 
     // squat
     squatUp: { b: 'stand', la1: 15, la2: 20, ra1: 18, ra2: 24 },
@@ -16,6 +16,8 @@
 
     // lunges
     lungeDown: { t1: 180, la1: -8, la2: -6, ra1: 8, ra2: 10, rl1: 90, rl2: 0, rf: 90, ll1: -35, ll2: -98, lf: 15 },
+    lungeStep: { t1: 176, t2: 178, la1: 4, la2: 8, ra1: -6, ra2: -4, rl1: -1, rl2: 0, rf: 90, ll1: -25, ll2: -75, lf: 40, anchor: 'rto' },   // back foot lifted mid-step
+    lungeReach: { t1: 178, t2: 180, la1: 6, la2: 10, ra1: -8, ra2: -6, rl1: 48, rl2: 0, rf: 90, ll1: -40, ll2: -50, lf: -30, anchor: 'rto' },   // back toe touches down before the knee bends
     sideLungeR: { v: 'f', t1: 172, hd: 174, la1: 20, la2: 160, ra1: -20, ra2: -160, rl1: 60, rl2: -5, ll1: -42, ll2: -42 },
     sideLungeL: { v: 'f', t1: 188, hd: 186, la1: 20, la2: 160, ra1: -20, ra2: -160, ll1: -60, ll2: 5, rl1: 42, rl2: 42 },
 
@@ -24,6 +26,8 @@
     pushDown: { t1: 98, hd: 102, ll1: -82, ll2: -82, rl1: -82, rl2: -82, ik: { l: { dx: -11 }, r: { dx: -8 } } },
     plankLow: { t1: 96.5, hd: 100, ll1: -83.5, ll2: -83.5, rl1: -83.5, rl2: -83.5, la1: 0, la2: 90, ra1: 3, ra2: 90 },
     sidePlank: { v: 'f', t1: 116, hd: 118, la1: 178, la2: 180, ra1: 0, ra2: 0, ll1: -62, ll2: -62, rl1: -64, rl2: -64, ik: { r: { dx: 0 } } },
+    mcSwitch: { b: 'plankHigh', ll1: 15, ll2: -75, rl1: 17, rl2: -75, lift: 6 },   // both feet in the air as the legs swap
+    burpeeHop: { t1: 120, hd: 126, ll1: 45, ll2: -75, rl1: 47, rl2: -75, lf: 0, rf: 0, ik: { l: { dx: 2 }, r: { dx: 5 } }, lift: 10 },   // hands down, feet jumping
     mcR: { b: 'plankHigh', rl1: 80, rl2: -65 },
     mcL: { b: 'plankHigh', ll1: 80, ll2: -65 },
     crouch: { t1: 128, t2: 132, hd: 140, ll1: 108, ll2: -25, rl1: 112, rl2: -25, lf: 90, rf: 90, ik: { l: { dx: 8 }, r: { dx: 12 } } },
@@ -39,6 +43,7 @@
 
     // lying face down (head to the right)
     prone: { t1: 90, hd: 92, la1: 90, la2: 90, ra1: 92, ra2: 92, ll1: -90, ll2: -90, rl1: -90, rl2: -90, lf: -90, rf: -90, anchor: 'hip' },
+    proneHands: { b: 'prone', ik: { l: { dx: -16 }, r: { dx: -13 } } },   // palms under the shoulders, ready to press up
     superman: { b: 'prone', t1: 93, t2: 106, hd: 110, la1: 106, la2: 108, ra1: 104, ra2: 106, ll1: -100, ll2: -102, rl1: -101, rl2: -103, lf: -102, rf: -103 },
 
     // misc conditioning
@@ -61,6 +66,7 @@
     sideBendL: { v: 'f', t1: 182, t2: 200, hd: 205, ra1: -160, ra2: -135, la1: -12, la2: -8, ll1: -4, ll2: -3, rl1: 4, rl2: 3 },
     hinge: { t1: 98, hd: 104, ll1: 8, ll2: 8, rl1: 10, rl2: 10, lf: 90, rf: 90, la1: 2, la2: 4, ra1: 4, ra2: 6 },
     table: { t1: 96, hd: 100, ll1: -2, ll2: -90, rl1: 2, rl2: -90, lf: -90, rf: -90, ik: { l: { dx: -1 }, r: { dx: 2 } }, anchor: 'rha' },
+    birdDogMid: { b: 'table', ik: { l: { dx: -1 } }, ra1: -30, ra2: 60, ll1: -10, ll2: -100, lf: -100 },   // hand and knee lift before reaching out
     birdDog: { t1: 96, hd: 100, ll1: -88, ll2: -88, lf: -88, rl1: 2, rl2: -90, rf: -90, ra1: 94, ra2: 94, ik: { l: { dx: -1 } } },
 
     // ---- Yoga -----------------------------------------------------------------

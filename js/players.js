@@ -285,7 +285,7 @@
     const e = Content.EX[id];
     return { frames: e.frames, anchor: e.anchor || 'hip', prop: e.prop || null, hl: e.hl };
   }
-  function framesFrom(list) { return list.map(([n, h, t, label]) => ({ pose: Poses.get(n), h, t, label })); }
+  function framesFrom(list) { return list.map(([n, h, t, label, anchor]) => ({ pose: Poses.get(n), h, t, label, anchor })); }
   const LBL = Figure.PAIR_LABEL;
 
   class TimedSession extends Session {

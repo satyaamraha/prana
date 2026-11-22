@@ -299,22 +299,22 @@
 
   // ===========================================================================
   // Exercises — animated demonstrations
-  // frames: [poseName, holdSeconds, transitionSeconds]
+  // frames: [poseName, holdSeconds, transitionSeconds, label?, pin?] — pin = body part kept still during that step (default: the exercise anchor)
   // ===========================================================================
   const EX = {
     jumping_jacks: { name: 'Jumping Jacks', frames: [['jjClosed', 0.05, 0.2], ['jjMid', 0, 0.14], ['jjOpen', 0.05, 0.2], ['jjMid', 0, 0.14]], muscles: 'Full body · cardio', level: 'Beginner',
       steps: ['Stand tall, feet together, arms by your sides.', 'Jump feet out wide while sweeping arms overhead.', 'Jump back to the start.', 'Land softly on the balls of your feet.'], tips: ['Keep a light bounce', 'Breathe rhythmically'] },
     high_knees: { name: 'High Knees', frames: [['hkA', 0.02, 0.22], ['hkB', 0.02, 0.22]], muscles: 'Hip flexors · core · cardio', level: 'Beginner',
       steps: ['Run on the spot.', 'Drive each knee up to hip height.', 'Pump the opposite arm.', 'Stay on the balls of your feet.'], tips: ['Tall chest', 'Quick, light feet'] },
-    march: { name: 'Standing March', frames: [['marchA', 0.15, 0.45], ['marchB', 0.15, 0.45]], muscles: 'Hips · warm-up', level: 'Beginner',
+    march: { name: 'Standing March', frames: [['marchA', 0.15, 0.22], ['stand', 0, 0.22], ['marchB', 0.15, 0.22], ['stand', 0, 0.22]], muscles: 'Hips · warm-up', level: 'Beginner',
       steps: ['Stand tall.', 'Lift one knee, then the other, at a steady pace.', 'Swing the arms naturally.'], tips: ['Low-impact alternative to high knees'] },
     squats: { name: 'Bodyweight Squats', frames: [['squatUp', 0.3, 1.0], ['squatDown', 0.25, 1.0]], anchor: 'ltoe', muscles: 'Quads · glutes · core', level: 'Beginner',
       steps: ['Feet shoulder-width apart, toes slightly out.', 'Push hips back and bend the knees as if sitting into a chair.', 'Lower until thighs are about parallel to the floor.', 'Drive through your heels to stand.'], tips: ['Keep heels down', 'Knees track over toes', 'Chest proud'] },
     squat_jumps: { name: 'Squat Jumps', frames: [['squatUp', 0.15, 0.5], ['squatDown', 0.1, 0.35], ['jumpUp', 0.05, 0.4]], anchor: 'ltoe', muscles: 'Legs · power · cardio', level: 'Intermediate',
       steps: ['Lower into a squat.', 'Explode upward, reaching arms overhead.', 'Land softly and sink straight into the next squat.'], tips: ['Soft knees on landing', 'Use the arms for momentum'] },
-    reverse_lunges: { name: 'Reverse Lunges', frames: [['stand', 0.3, 0.9], ['lungeDown', 0.3, 0.9]], anchor: 'rtoe', muscles: 'Quads · glutes · balance', level: 'Beginner',
+    reverse_lunges: { name: 'Reverse Lunges', frames: [['stand', 0.3, 0.35], ['lungeStep', 0, 0.3], ['lungeReach', 0, 0.35], ['lungeDown', 0.3, 0.35], ['lungeReach', 0, 0.3], ['lungeStep', 0, 0.35]], anchor: 'rtoe', muscles: 'Quads · glutes · balance', level: 'Beginner',
       steps: ['Stand tall, hands on hips or by your sides.', 'Step one foot back and lower the back knee toward the floor.', 'Front knee stays over the ankle.', 'Push through the front heel to return. Alternate legs.'], tips: ['Torso upright', 'Back knee hovers just above the floor'] },
-    side_lunges: { name: 'Side Lunges', frames: [['standWide', 0.3, 0.8], ['sideLungeR', 0.35, 0.8], ['standWide', 0.3, 0.8], ['sideLungeL', 0.35, 0.8]], muscles: 'Inner thighs · glutes · quads', level: 'Beginner',
+    side_lunges: { name: 'Side Lunges', frames: [['standWide', 0.3, 0.8], ['sideLungeR', 0.35, 0.8], ['standWide', 0.3, 0.8], ['sideLungeL', 0.35, 0.8]], anchor: 'ltoe', muscles: 'Inner thighs · glutes · quads', level: 'Beginner',
       steps: ['Stand with feet wide.', 'Shift your weight to one side, bending that knee and sitting the hips back.', 'Keep the other leg straight.', 'Push back to centre and switch sides.'], tips: ['Both feet stay flat', 'Chest up'] },
     pushups: { name: 'Push-ups', frames: [['plankHigh', 0.25, 0.9], ['pushDown', 0.15, 0.9]], anchor: 'ltoe', muscles: 'Chest · shoulders · triceps · core', level: 'Intermediate',
       steps: ['Start in a high plank, hands under shoulders.', 'Lower your chest toward the floor, elbows at about 45°.', 'Keep a straight line from head to heels.', 'Press back up.'], tips: ['Too hard? Drop to your knees', 'Squeeze glutes to protect the lower back'] },
@@ -322,9 +322,9 @@
       steps: ['Elbows under shoulders, forearms on the floor.', 'Step feet back; body forms a straight line.', 'Brace your abs and squeeze your glutes.', 'Breathe steadily and hold.'], tips: ['Don’t let hips sag or pike', 'Look at the floor just ahead of your hands'] },
     side_plank: { name: 'Side Plank', frames: [['sidePlank', 2, 0]], muscles: 'Obliques · shoulders', level: 'Intermediate',
       steps: ['Lie on your side, supporting hand under the shoulder.', 'Stack the feet and lift the hips.', 'Reach the top arm to the sky.', 'Hold, then switch sides halfway.'], tips: ['Easier: bend the bottom knee', 'Keep hips lifted'] },
-    mountain_climbers: { name: 'Mountain Climbers', frames: [['mcR', 0.02, 0.28], ['mcL', 0.02, 0.28]], anchor: 'rhand', muscles: 'Core · shoulders · cardio', level: 'Intermediate',
+    mountain_climbers: { name: 'Mountain Climbers', frames: [['mcR', 0.02, 0.14], ['mcSwitch', 0, 0.14], ['mcL', 0.02, 0.14], ['mcSwitch', 0, 0.14]], anchor: 'rhand', muscles: 'Core · shoulders · cardio', level: 'Intermediate',
       steps: ['Start in a high plank.', 'Drive one knee toward your chest.', 'Quickly switch legs, like running in place.'], tips: ['Hips level with shoulders', 'Hands stay planted'] },
-    burpees: { name: 'Burpees', frames: [['stand', 0.15, 0.35], ['crouch', 0.05, 0.3], ['plankHigh', 0.15, 0.3], ['crouch', 0.05, 0.3], ['stand', 0, 0.3], ['jumpUp', 0.05, 0.35]], muscles: 'Full body · cardio', level: 'Advanced',
+    burpees: { name: 'Burpees', frames: [['stand', 0.15, 0.35, null, 'ltoe'], ['crouch', 0.05, 0.15, null, 'lhand'], ['burpeeHop', 0, 0.15, null, 'lhand'], ['plankHigh', 0.15, 0.15, null, 'lhand'], ['burpeeHop', 0, 0.15, null, 'lhand'], ['crouch', 0.05, 0.3, null, 'ltoe'], ['stand', 0, 0.3, null, 'ltoe'], ['jumpUp', 0.05, 0.35, null, 'ltoe']], muscles: 'Full body · cardio', level: 'Advanced',
       steps: ['Squat down and place hands on the floor.', 'Jump or step the feet back to a plank.', 'Jump the feet back toward the hands.', 'Explode up with arms overhead.'], tips: ['Step instead of jump to lower the impact', 'Keep the core tight in the plank'] },
     crunches: { name: 'Crunches', frames: [['hook', 0.3, 0.7], ['crunchUp', 0.3, 0.7]], muscles: 'Abs', level: 'Beginner',
       steps: ['Lie on your back, knees bent, feet flat.', 'Exhale and curl your head and shoulders off the floor.', 'Reach toward your knees.', 'Lower slowly with control.'], tips: ['Don’t pull on your neck', 'Lower back stays down'] },
@@ -348,9 +348,9 @@
       steps: ['Stand tall, knees soft.', 'Push the hips back, letting the torso tip forward with a flat back.', 'Stop when you feel the hamstrings stretch.', 'Drive the hips forward to stand.'], tips: ['Spine stays long', 'Movement comes from the hips'] },
     cat_cow: { name: 'Cat–Cow', frames: [['cow', 0.6, 1.5], ['cat', 0.6, 1.5]], anchor: 'rhand', muscles: 'Spine mobility', level: 'Beginner',
       steps: ['On hands and knees, wrists under shoulders.', 'Inhale: drop the belly, lift chest and gaze (cow).', 'Exhale: round the spine, tuck the chin (cat).'], tips: ['Move with your breath'] },
-    bird_dog: { name: 'Bird Dog', frames: [['table', 0.3, 0.8], ['birdDog', 1, 0.8]], anchor: 'lhand', muscles: 'Core · back · balance', level: 'Beginner',
+    bird_dog: { name: 'Bird Dog', frames: [['table', 0.3, 0.4], ['birdDogMid', 0, 0.4], ['birdDog', 1, 0.4], ['birdDogMid', 0, 0.4]], anchor: 'lhand', muscles: 'Core · back · balance', level: 'Beginner',
       steps: ['Start on hands and knees.', 'Extend one arm forward and the opposite leg back.', 'Hold for a breath, return, then switch sides.'], tips: ['Keep hips square to the floor'] },
-    cobra_stretch: { name: 'Cobra Stretch', frames: [['prone', 0.5, 1.2], ['cobra', 1.5, 1.2]], muscles: 'Spine · chest · abs stretch', level: 'Beginner',
+    cobra_stretch: { name: 'Cobra Stretch', frames: [['proneHands', 0.5, 1.2], ['cobra', 1.5, 1.2]], muscles: 'Spine · chest · abs stretch', level: 'Beginner',
       steps: ['Lie face down, hands under shoulders.', 'Press gently to lift the chest.', 'Keep elbows soft and shoulders down.'], tips: ['Lift only as high as is comfortable'] },
     forward_fold: { name: 'Forward Fold', frames: [['stand', 0.3, 1.4], ['fold', 2, 1.4]], anchor: 'ltoe', muscles: 'Hamstrings · back stretch', level: 'Beginner',
       steps: ['Stand tall.', 'Hinge at the hips and fold forward.', 'Let your head and arms hang heavy; bend knees as needed.'], tips: ['Soft knees protect the lower back'] },

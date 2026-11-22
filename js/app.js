@@ -140,7 +140,7 @@
   let liveFigs = [], liveGroups = [];
   const SPEEDS = [1, 0.5, 0.25];
   const speedLabel = (v) => ({ 1: '1×', 0.5: '½×', 0.25: '¼×' }[v] || v + '×');
-  const framesOf = (list) => list.map(([n, hh, t, label]) => ({ pose: Poses.get(n), h: hh, t, label }));
+  const framesOf = (list) => list.map(([n, hh, t, label, anchor]) => ({ pose: Poses.get(n), h: hh, t, label, anchor }));
 
   /** Demo stage: two large, labelled camera angles side by side (or one, if turned off), speed button and step caption. */
   function stage(figSpec, opts = {}) {

@@ -382,8 +382,21 @@
       Object.assign(this.o, o);
       this.mode = 'loop';
       this.cur = null; this.from = null; this.phase = -1; this.order = '';
-      this.kf = frames.map((f) => ({ K: prep(f.pose), h: f.h || 0, t: f.t || 0, label: f.label || null }));
+      this.kf = frames.map((f) => ({ K: prep(f.pose), h: f.h || 0, t: f.t || 0, label: f.label || null, anchor: f.anchor || null }));
       this.cycle = this.kf.reduce((a, k) => a + k.h + k.t, 0) || 1;
+      // Each step can pin its own body part (feet while squatting, hands while jumping back).
+      // Offsets chain so the pinned part never jumps when the pin changes.
+      const base = ANCHOR[this.o.anchor] || 'hip';
+      let off = [0, 0];
+      this.kf.forEach((k, i) => {
+        k.key = ANCHOR[k.anchor] || base;
+        if (i) {
+          const prev = this.kf[i - 1].key, P = k.K.P;
+          off = [off[0] + P[k.key][0] - P[prev][0], off[1] + P[k.key][2] - P[prev][2]];
+        }
+        k.off = off;
+      });
+      this._seg = 0;
       this.t = 0;
       this._fitLoop();
       this._tick(0);
@@ -394,8 +407,9 @@
     _loopCam(q, tOverride) {
       const a = this._angles(this.kf[0].K.v);
       const { P } = solve(q);
-      const key = ANCHOR[this.o.anchor] || 'hip';
-      return { P, cam: { th: tOverride != null ? tOverride : a.th, ph: a.ph, flip: !!this.o.flip, ox: -P[key][0], oz: -P[key][2] } };
+      const seg = (this.kf && this.kf[this._seg || 0]) || null;
+      const key = seg ? seg.key : ANCHOR[this.o.anchor] || 'hip', off = seg ? seg.off : [0, 0];
+      return { P, cam: { th: tOverride != null ? tOverride : a.th, ph: a.ph, flip: !!this.o.flip, ox: off[0] - P[key][0], oz: off[1] - P[key][2] } };
     }
 
     _fitLoop() {
@@ -415,19 +429,19 @@
 
     _sample(time) {
       const kf = this.kf, n = kf.length;
-      if (n === 1) return Object.assign({}, kf[0].K.q, { ik: kf[0].K.ik });
+      if (n === 1) { this._seg = 0; return Object.assign({}, kf[0].K.q, { ik: kf[0].K.ik }); }
       let t = ((time % this.cycle) + this.cycle) % this.cycle;
       for (let i = 0; i < n; i++) {
         const k = kf[i];
-        if (t < k.h) { this._phaseIdx = i; return Object.assign({}, k.K.q, { ik: k.K.ik }); }
+        if (t < k.h) { this._phaseIdx = i; this._seg = i; return Object.assign({}, k.K.q, { ik: k.K.ik }); }
         t -= k.h;
         if (t < k.t) {
-          this._phaseIdx = (i + 1) % n;
+          this._phaseIdx = (i + 1) % n; this._seg = i;
           return lerpK(k.K, kf[(i + 1) % n].K, ease(t / k.t));
         }
         t -= k.t;
       }
-      this._phaseIdx = 0;
+      this._phaseIdx = 0; this._seg = 0;
       return Object.assign({}, kf[0].K.q, { ik: kf[0].K.ik });
     }
 
