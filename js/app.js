@@ -1618,6 +1618,7 @@
 
   applyTheme();
   render();
+  document.documentElement.classList.remove('booting');
 
   // Sync events: refresh when merged data arrives, route email-link results.
   Sync.on((evt) => {
